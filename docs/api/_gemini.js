@@ -51,6 +51,7 @@ function req(key, mode, url) {
   if (mode === "bearer") h.Authorization = "Bearer " + key;
   return { u, h };
 }
+const isBusy = (status, msg) => status === 503 || status === 500 || status === 504 || /high demand|overloaded|UNAVAILABLE|try again later/i.test(msg);
 const isAuthErr = (status, msg) => status === 401 || status === 403 || (status === 400 && /api key|api_key|credential|ACCESS_TOKEN/i.test(msg));
 // Ask Google which models this key can call with generateContent; prefer Flash models (fast, cheap).
 async function discoverModels(key, mode) {
@@ -73,7 +74,8 @@ async function geminiRound(key, system, messages, tools) {
   if (WORKING) {                                    // fast path once a combination is known to work
     const r = await callOnce(key, WORKING.model, WORKING.mode, body);
     if (r.ok) return fromGemini(r.j, WORKING.model);
-    if (r.status !== 404 && !isAuthErr(r.status, (r.j.error && r.j.error.message) || "")) return mapErr(r);
+    const em = (r.j.error && r.j.error.message) || "";
+    if (r.status !== 404 && !isBusy(r.status, em) && !isAuthErr(r.status, em)) return mapErr(r);
     WORKING = null;
   }
   // 1) find an auth mode the key accepts, using the first candidate model
@@ -86,16 +88,22 @@ async function geminiRound(key, system, messages, tools) {
     if (!isAuthErr(r.status, msg)) { mode = m; break; }   // auth accepted (e.g. 404 model, 400 bad request)
   }
   if (!mode) { console.error("[copilot] Gemini rejected the key in every auth mode:", lastErr.status, lastErr.j.error && lastErr.j.error.message); return { status: 401, error: "authentication_error", message: "Google rejected the Gemini API key: " + ((lastErr.j.error && lastErr.j.error.message) || lastErr.status) }; }
-  if (lastErr.status !== 404) return mapErr(lastErr);
-  // 2) the first model isn't available: try the rest, then whatever this key can actually use
+  const lastMsg = (lastErr.j.error && lastErr.j.error.message) || "";
+  if (lastErr.status !== 404 && !isBusy(lastErr.status, lastMsg)) return mapErr(lastErr);
+  let busySeen = isBusy(lastErr.status, lastMsg);
+  // 2) the first model is missing or busy: try the rest, then whatever this key can actually use
   const tried = new Set([models[0]]);
   const discovered = await discoverModels(key, mode);
-  for (const model of [...models.slice(1), ...discovered]) {
+  const fallbacks = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-lite-latest"];
+  for (const model of [...models.slice(1), ...discovered, ...fallbacks].slice(0, 9)) {
     if (tried.has(model)) continue; tried.add(model);
     const r = await callOnce(key, model, mode, body);
     if (r.ok) { WORKING = { model, mode }; console.log("[copilot] using Gemini model", model, "auth", mode); return fromGemini(r.j, model); }
+    const m2 = (r.j.error && r.j.error.message) || "";
+    if (isBusy(r.status, m2)) { busySeen = true; continue; }        // overloaded: move on to another model
     if (r.status !== 404) return mapErr(r);
   }
+  if (busySeen) return { status: 503, error: "overloaded_error", message: "Gemini is very busy right now. Wait a few seconds and ask again." };
   console.error("[copilot] no usable Gemini model; tried", [...tried].join(", "));
   return { status: 404, error: "model_not_found", message: `No Gemini model was available for this key (tried ${[...tried].join(", ")}). Set GEMINI_MODEL in Vercel.` };
 }
