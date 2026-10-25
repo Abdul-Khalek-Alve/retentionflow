@@ -43,29 +43,72 @@ function fromGemini(j, model) {
 }
 
 let WORKING = null;                                 // {model, mode} that last succeeded (kept per warm instance)
+const AUTH_MODES = ["header", "query", "bearer"];   // x-goog-api-key header, ?key= parameter, Authorization: Bearer
+function req(key, mode, url) {
+  const u = mode === "query" ? url + (url.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(key) : url;
+  const h = { "Content-Type": "application/json" };
+  if (mode === "header") h["x-goog-api-key"] = key;
+  if (mode === "bearer") h.Authorization = "Bearer " + key;
+  return { u, h };
+}
+const isAuthErr = (status, msg) => status === 401 || status === 403 || (status === 400 && /api key|api_key|credential|ACCESS_TOKEN/i.test(msg));
+// Ask Google which models this key can call with generateContent; prefer Flash models (fast, cheap).
+async function discoverModels(key, mode) {
+  const { u, h } = req(key, mode, BASE().replace(/\/$/, "") + "?pageSize=200");
+  try {
+    const r = await fetch(u, { headers: h }); const j = await r.json().catch(() => ({}));
+    if (!r.ok) return [];
+    const names = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes("generateContent")).map(m => String(m.name).replace(/^models\//, ""));
+    const score = n => (/flash/.test(n) ? 0 : 10) + (/lite|image|tts|audio|live|embed|vision/.test(n) ? 5 : 0) + (/preview|exp/.test(n) ? 1 : 0);
+    return names.sort((x, y) => score(x) - score(y) || y.localeCompare(x)).slice(0, 4);
+  } catch (e) { return []; }
+}
+async function callOnce(key, model, mode, body) {
+  const { u, h } = req(key, mode, BASE() + encodeURIComponent(model) + ":generateContent");
+  try { const r = await fetch(u, { method: "POST", headers: h, body }); return { status: r.status, ok: r.ok, j: await r.json().catch(() => ({})) }; }
+  catch (e) { return { status: 0, ok: false, j: { error: { message: "Could not reach the Gemini API: " + (e && e.message) } } }; }
+}
 async function geminiRound(key, system, messages, tools) {
   const body = JSON.stringify(toGemini(system, messages, tools));
-  let last = { status: 502, error: "upstream_error", message: "Could not reach the Gemini API." };
-  const models = WORKING ? [WORKING.model, ...MODELS().filter(m => m !== WORKING.model)] : MODELS();
-  for (const model of models) {
-    // Try the documented header first; some newer "AQ." keys are only accepted as a ?key= parameter.
-    const modes = WORKING && WORKING.model === model ? [WORKING.mode, WORKING.mode === "header" ? "query" : "header"] : ["header", "query"];
-    for (const mode of modes) {
-      const url = BASE() + encodeURIComponent(model) + ":generateContent" + (mode === "query" ? "?key=" + encodeURIComponent(key) : "");
-      const headers = { "Content-Type": "application/json", ...(mode === "header" ? { "x-goog-api-key": key } : {}) };
-      let r, j;
-      try { r = await fetch(url, { method: "POST", headers, body }); j = await r.json().catch(() => ({})); }
-      catch (e) { last = { status: 502, error: "upstream_error", message: "Could not reach the Gemini API." }; break; }
-      if (r.ok) { WORKING = { model, mode }; return fromGemini(j, model); }
-      const msg = (j.error && j.error.message) || `Gemini HTTP ${r.status}`;
-      if (r.status === 404) { last = { status: 404, error: "model_not_found", message: msg }; break; }          // try the next model
-      if ((r.status === 401 || r.status === 403) && mode === modes[0]) { last = { status: r.status, error: "authentication_error", message: msg }; continue; }
-      if (r.status === 429) return { status: 429, error: "rate_limited", message: "Gemini rate limit reached. Wait a moment and try again." };
-      if (r.status === 401 || r.status === 403) return { status: r.status, error: "authentication_error", message: "The Gemini API key was rejected: " + msg };
-      return { status: r.status, error: "upstream_error", message: msg };
-    }
-    if (last.error === "authentication_error") return { ...last, message: "The Gemini API key was rejected: " + last.message };
+  if (WORKING) {                                    // fast path once a combination is known to work
+    const r = await callOnce(key, WORKING.model, WORKING.mode, body);
+    if (r.ok) return fromGemini(r.j, WORKING.model);
+    if (r.status !== 404 && !isAuthErr(r.status, (r.j.error && r.j.error.message) || "")) return mapErr(r);
+    WORKING = null;
   }
-  return last;
+  // 1) find an auth mode the key accepts, using the first candidate model
+  let models = MODELS(), mode = null, lastErr = null;
+  for (const m of AUTH_MODES) {
+    const r = await callOnce(key, models[0], m, body);
+    if (r.ok) { WORKING = { model: models[0], mode: m }; return fromGemini(r.j, models[0]); }
+    const msg = (r.j.error && r.j.error.message) || "";
+    lastErr = r;
+    if (!isAuthErr(r.status, msg)) { mode = m; break; }   // auth accepted (e.g. 404 model, 400 bad request)
+  }
+  if (!mode) { console.error("[copilot] Gemini rejected the key in every auth mode:", lastErr.status, lastErr.j.error && lastErr.j.error.message); return { status: 401, error: "authentication_error", message: "Google rejected the Gemini API key: " + ((lastErr.j.error && lastErr.j.error.message) || lastErr.status) }; }
+  if (lastErr.status !== 404) return mapErr(lastErr);
+  // 2) the first model isn't available: try the rest, then whatever this key can actually use
+  const tried = new Set([models[0]]);
+  const discovered = await discoverModels(key, mode);
+  for (const model of [...models.slice(1), ...discovered]) {
+    if (tried.has(model)) continue; tried.add(model);
+    const r = await callOnce(key, model, mode, body);
+    if (r.ok) { WORKING = { model, mode }; console.log("[copilot] using Gemini model", model, "auth", mode); return fromGemini(r.j, model); }
+    if (r.status !== 404) return mapErr(r);
+  }
+  console.error("[copilot] no usable Gemini model; tried", [...tried].join(", "));
+  return { status: 404, error: "model_not_found", message: `No Gemini model was available for this key (tried ${[...tried].join(", ")}). Set GEMINI_MODEL in Vercel.` };
 }
-module.exports = { geminiRound, toGemini, fromGemini };
+function mapErr(r) {
+  const msg = (r.j.error && r.j.error.message) || `Gemini HTTP ${r.status}`;
+  console.error("[copilot] Gemini error", r.status, msg);
+  if (r.status === 429) return { status: 429, error: "rate_limited", message: "Gemini rate limit or quota reached: " + msg };
+  if (isAuthErr(r.status, msg)) return { status: 401, error: "authentication_error", message: "Google rejected the Gemini API key: " + msg };
+  return { status: r.status || 502, error: "upstream_error", message: "Gemini error: " + msg };
+}
+// Diagnostic used by /api/health?probe=1 — one tiny request, reports the outcome (never the key).
+async function probe(key) {
+  const out = await geminiRound(key, "Reply with the single word OK.", [{ role: "user", content: "Say OK" }], []);
+  return out.error ? { ok: false, error: out.error, message: out.message } : { ok: true, model: out.model, auth: WORKING && WORKING.mode, reply: (out.content || []).map(b => b.text || "").join("").slice(0, 40) };
+}
+module.exports = { geminiRound, toGemini, fromGemini, probe };

@@ -1277,7 +1277,7 @@ Tools are unavailable in this view, so here is the selected student's data: ${JS
         ${m.done ? `<div class="msg-tools"><span>Was this helpful?</span><button type="button" data-rate="${i}:1" aria-pressed="${m.rated === 1}">Helpful</button><button type="button" data-rate="${i}:0" aria-pressed="${m.rated === 0}">Not helpful</button><button type="button" data-copy="${i}">Copy</button>${m.ratedMsg ? `<span>${esc(m.ratedMsg)}</span>` : ""}</div>` : ""}</div>`).join("");
     if (atBottom || busy) el.scrollTop = el.scrollHeight;
   }
-  const ERR = { bad_code: "Wrong advisor access code.", not_configured: "The co-pilot isn't configured on this deployment.", too_large: "The conversation is too long. Start a new chat.", authentication_error: "The server's Anthropic API key was rejected.", overloaded_error: "Claude is busy right now. Try again in a moment.", not_granted: "Claude access was declined for this page, so the co-pilot is off for this visit.", sampling_disabled: "Claude is not available for this account.", rate_limited: "Too many requests right now. Wait a moment and ask again.",
+  const ERR = { authentication_error: "The AI provider rejected the API key saved in Vercel. Check GEMINI_API_KEY.", model_not_found: "No AI model is available for this key. Set GEMINI_MODEL in Vercel.", bad_code: "Wrong advisor access code.", not_configured: "The co-pilot isn't configured on this deployment.", too_large: "The conversation is too long. Start a new chat.",  overloaded_error: "Claude is busy right now. Try again in a moment.", not_granted: "Claude access was declined for this page, so the co-pilot is off for this visit.", sampling_disabled: "Claude is not available for this account.", rate_limited: "Too many requests right now. Wait a moment and ask again.",
     session_expired: "Your claude.ai session expired. Sign in again.", refused: "Claude declined that request. Try rephrasing it.", tools_unavailable: "Tools are unavailable here.", prompt_too_large: "The conversation is too long. Start a new chat." };
   async function ask(q) {
     q = String(q || "").trim(); if (!q || busy) return;
@@ -1297,7 +1297,7 @@ Tools are unavailable in this view, so here is the selected student's data: ${JS
     } catch (e) {
       m.text = (e && e.text) || m.text || "";
       if (e && e.code === "refused") m.text = "";
-      if (!e || e.code !== "cancelled") m.err = ERR[e && e.code] || "The co-pilot could not finish. Try again.";
+      if (!e || e.code !== "cancelled") m.err = (ERR[e && e.code] || "The co-pilot could not finish.") + (WEB && e && e.message ? ` Details: ${e.message}` : "");
       if (e && e.code === "cancelled") m.err = "Stopped.";
       if (m.text) { turns.push({ role: "assistant", content: m.text }); m.done = true; } else turns.pop();
       if (e && ["not_granted", "sampling_disabled"].includes(e.code)) SAMPLE = null;
