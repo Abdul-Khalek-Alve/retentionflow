@@ -1,0 +1,119 @@
+[
+  {
+    "attribute": "Gender",
+    "groups": [
+      {
+        "group": "Female",
+        "n": 580,
+        "actual_dropout_rate": 0.24482758620689654,
+        "flag_rate": 0.22413793103448276,
+        "recall": 0.7887323943661971,
+        "false_positive_rate": 0.0410958904109589,
+        "precision": 0.8615384615384616
+      },
+      {
+        "group": "Male",
+        "n": 305,
+        "actual_dropout_rate": 0.46557377049180326,
+        "flag_rate": 0.4426229508196721,
+        "recall": 0.823943661971831,
+        "false_positive_rate": 0.11042944785276074,
+        "precision": 0.8666666666666667
+      }
+    ],
+    "disparate_impact_ratio": 0.5063856960408685,
+    "equal_opportunity_gap": 0.03521126760563387,
+    "overall_flag_rate": 0.2994350282485876,
+    "note": "DIR < 0.8 (four-fifths rule) warrants review; differences in flag rate can reflect genuinely different base rates, so read alongside recall and FPR."
+  },
+  {
+    "attribute": "International",
+    "groups": [
+      {
+        "group": "Domestic",
+        "n": 858,
+        "actual_dropout_rate": 0.32284382284382285,
+        "flag_rate": 0.29953379953379955,
+        "recall": 0.8086642599277978,
+        "false_positive_rate": 0.05679862306368331,
+        "precision": 0.8715953307392996
+      },
+      {
+        "group": "International",
+        "n": 27,
+        "actual_dropout_rate": 0.25925925925925924,
+        "flag_rate": 0.2962962962962963,
+        "recall": 0.7142857142857143,
+        "false_positive_rate": 0.15,
+        "precision": 0.625
+      }
+    ],
+    "disparate_impact_ratio": 0.9891915261565066,
+    "equal_opportunity_gap": 0.09437854564208348,
+    "overall_flag_rate": 0.2994350282485876,
+    "note": "DIR < 0.8 (four-fifths rule) warrants review; differences in flag rate can reflect genuinely different base rates, so read alongside recall and FPR."
+  },
+  {
+    "attribute": "Age band",
+    "groups": [
+      {
+        "group": "<=20",
+        "n": 508,
+        "actual_dropout_rate": 0.19881889763779528,
+        "flag_rate": 0.19094488188976377,
+        "recall": 0.693069306930693,
+        "false_positive_rate": 0.06633906633906633,
+        "precision": 0.7216494845360825
+      },
+      {
+        "group": "21-25",
+        "n": 150,
+        "actual_dropout_rate": 0.3466666666666667,
+        "flag_rate": 0.3,
+        "recall": 0.7692307692307693,
+        "false_positive_rate": 0.05102040816326531,
+        "precision": 0.8888888888888888
+      },
+      {
+        "group": ">25",
+        "n": 227,
+        "actual_dropout_rate": 0.5770925110132159,
+        "flag_rate": 0.5418502202643172,
+        "recall": 0.9083969465648855,
+        "false_positive_rate": 0.041666666666666664,
+        "precision": 0.967479674796748
+      }
+    ],
+    "disparate_impact_ratio": 0.35239421291850714,
+    "equal_opportunity_gap": 0.21532763963419244,
+    "overall_flag_rate": 0.2994350282485876,
+    "note": "DIR < 0.8 (four-fifths rule) warrants review; differences in flag rate can reflect genuinely different base rates, so read alongside recall and FPR."
+  },
+  {
+    "attribute": "Scholarship",
+    "groups": [
+      {
+        "group": "No scholarship",
+        "n": 668,
+        "actual_dropout_rate": 0.38323353293413176,
+        "flag_rate": 0.3652694610778443,
+        "recall": 0.8203125,
+        "false_positive_rate": 0.0825242718446602,
+        "precision": 0.860655737704918
+      },
+      {
+        "group": "Scholarship",
+        "n": 217,
+        "actual_dropout_rate": 0.12903225806451613,
+        "flag_rate": 0.0967741935483871,
+        "recall": 0.6785714285714286,
+        "false_positive_rate": 0.010582010582010581,
+        "precision": 0.9047619047619048
+      }
+    ],
+    "disparate_impact_ratio": 0.26493918561607616,
+    "equal_opportunity_gap": 0.1417410714285714,
+    "overall_flag_rate": 0.2994350282485876,
+    "note": "DIR < 0.8 (four-fifths rule) warrants review; differences in flag rate can reflect genuinely different base rates, so read alongside recall and FPR."
+  }
+]

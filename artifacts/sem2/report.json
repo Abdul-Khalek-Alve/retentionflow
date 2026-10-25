@@ -1,0 +1,441 @@
+{
+  "checkpoint": "sem2",
+  "checkpoint_label": "End of Semester 2",
+  "split": {
+    "train": 2654,
+    "validation": 885,
+    "test": 885,
+    "random_state": 42,
+    "design": "stratified 60/20/20; tuning on train CV, threshold+champion on validation, test used once"
+  },
+  "features_used": [
+    "Application mode",
+    "Course",
+    "Previous qualification",
+    "Mother's qualification",
+    "Father's qualification",
+    "Mother's occupation",
+    "Father's occupation",
+    "Application order",
+    "Previous qualification (grade)",
+    "Admission grade",
+    "Age at enrollment",
+    "Unemployment rate",
+    "Inflation rate",
+    "GDP",
+    "Curricular units 1st sem (credited)",
+    "Curricular units 1st sem (enrolled)",
+    "Curricular units 1st sem (evaluations)",
+    "Curricular units 1st sem (approved)",
+    "Curricular units 1st sem (grade)",
+    "Curricular units 1st sem (without evaluations)",
+    "Curricular units 2nd sem (credited)",
+    "Curricular units 2nd sem (enrolled)",
+    "Curricular units 2nd sem (evaluations)",
+    "Curricular units 2nd sem (approved)",
+    "Curricular units 2nd sem (grade)",
+    "Curricular units 2nd sem (without evaluations)",
+    "Daytime/evening attendance",
+    "Displaced",
+    "Educational special needs",
+    "Debtor",
+    "Tuition fees up to date",
+    "Scholarship holder"
+  ],
+  "excluded_sensitive": [
+    "Gender",
+    "Nacionality",
+    "Marital status",
+    "International"
+  ],
+  "champion": "logreg",
+  "champion_label": "Logistic Regression, class-balanced (baseline 1)",
+  "threshold": 0.6,
+  "shap_units": "log-odds",
+  "tuning": {
+    "logreg": {
+      "best_params": {
+        "C": 0.1
+      },
+      "cv_macro_f1": 0.8407137942549205,
+      "threshold": 0.6,
+      "val_macro_f1": 0.8684626828991923,
+      "fit_seconds": 0.9
+    },
+    "rf": {
+      "best_params": {
+        "max_depth": 14,
+        "min_samples_leaf": 1,
+        "n_estimators": 300
+      },
+      "cv_macro_f1": 0.839224758056762,
+      "threshold": 0.47,
+      "val_macro_f1": 0.8625969628084648,
+      "fit_seconds": 27.2
+    },
+    "hgb": {
+      "best_params": {
+        "learning_rate": 0.08,
+        "max_depth": 3,
+        "max_iter": 400
+      },
+      "cv_macro_f1": 0.841081491865906,
+      "threshold": 0.54,
+      "val_macro_f1": 0.8596906420071949,
+      "fit_seconds": 18.3
+    }
+  },
+  "test_results": {
+    "heuristic": {
+      "label": "Rule-based heuristic (baseline 0)",
+      "accuracy": 0.8011299435028248,
+      "precision": 0.6363636363636364,
+      "recall": 0.8873239436619719,
+      "f1": 0.7411764705882353,
+      "macro_f1": 0.7898542903399892,
+      "ci95": {
+        "precision": [
+          0.587338817528691,
+          0.6802997196569921
+        ],
+        "recall": [
+          0.8503882136684134,
+          0.9219858156028369
+        ],
+        "f1": [
+          0.7028473091364205,
+          0.7776260883501875
+        ],
+        "macro_f1": [
+          0.7615760406120289,
+          0.8163826694700975
+        ]
+      },
+      "confusion_matrix": [
+        [
+          457,
+          144
+        ],
+        [
+          32,
+          252
+        ]
+      ]
+    },
+    "logreg": {
+      "label": "Logistic Regression, class-balanced (baseline 1)",
+      "accuracy": 0.8971751412429378,
+      "precision": 0.8641509433962264,
+      "recall": 0.8063380281690141,
+      "f1": 0.8342440801457195,
+      "macro_f1": 0.8798575028083224,
+      "roc_auc": 0.936725176349277,
+      "brier": 0.09606823675276364,
+      "ci95": {
+        "precision": [
+          0.8228282956565913,
+          0.9034880308880309
+        ],
+        "recall": [
+          0.7617254783983388,
+          0.8500124584717608
+        ],
+        "f1": [
+          0.8007586599245934,
+          0.8654627942945523
+        ],
+        "macro_f1": [
+          0.8567655640961619,
+          0.9017615494803753
+        ],
+        "roc_auc": [
+          0.9194635329628926,
+          0.9542081983281591
+        ]
+      },
+      "confusion_matrix": [
+        [
+          565,
+          36
+        ],
+        [
+          55,
+          229
+        ]
+      ]
+    },
+    "rf": {
+      "label": "Random Forest (proposed candidate)",
+      "accuracy": 0.8847457627118644,
+      "precision": 0.85,
+      "recall": 0.778169014084507,
+      "f1": 0.8125,
+      "macro_f1": 0.8646513050570963,
+      "roc_auc": 0.932852522790654,
+      "brier": 0.09261586027917046,
+      "ci95": {
+        "precision": [
+          0.8059495719929763,
+          0.8942795808094713
+        ],
+        "recall": [
+          0.7287997420781135,
+          0.8253722892457998
+        ],
+        "f1": [
+          0.7759989071038251,
+          0.8490000740228978
+        ],
+        "macro_f1": [
+          0.838934702403529,
+          0.889920379765544
+        ],
+        "roc_auc": [
+          0.9129957317567541,
+          0.9518416139549789
+        ]
+      },
+      "confusion_matrix": [
+        [
+          562,
+          39
+        ],
+        [
+          63,
+          221
+        ]
+      ]
+    },
+    "hgb": {
+      "label": "Gradient Boosting (refinement candidate)",
+      "accuracy": 0.8757062146892656,
+      "precision": 0.7959183673469388,
+      "recall": 0.823943661971831,
+      "f1": 0.8096885813148789,
+      "macro_f1": 0.8587033510601241,
+      "roc_auc": 0.9246853835157367,
+      "brier": 0.09693652481710183,
+      "ci95": {
+        "precision": [
+          0.7475401666575895,
+          0.8405486778306546
+        ],
+        "recall": [
+          0.7813535044345028,
+          0.8659848264846813
+        ],
+        "f1": [
+          0.7737503196295139,
+          0.8417394232176841
+        ],
+        "macro_f1": [
+          0.8330067231323223,
+          0.8816828542582953
+        ],
+        "roc_auc": [
+          0.9026464898275556,
+          0.9449254772593824
+        ]
+      },
+      "confusion_matrix": [
+        [
+          541,
+          60
+        ],
+        [
+          50,
+          234
+        ]
+      ]
+    }
+  },
+  "comparisons": {
+    "logreg_vs_logreg": null,
+    "logreg_vs_heuristic": {
+      "mean": 0.09043041901125795,
+      "ci95": [
+        0.06509321916803204,
+        0.11773166447439126
+      ],
+      "significant": true
+    }
+  },
+  "calibration": [
+    {
+      "mean_predicted": 0.0494260950154231,
+      "observed_rate": 0.011235955056179775
+    },
+    {
+      "mean_predicted": 0.08089243567124571,
+      "observed_rate": 0.056818181818181816
+    },
+    {
+      "mean_predicted": 0.11313112969721145,
+      "observed_rate": 0.011235955056179775
+    },
+    {
+      "mean_predicted": 0.15714713507294098,
+      "observed_rate": 0.022727272727272728
+    },
+    {
+      "mean_predicted": 0.21896341914925213,
+      "observed_rate": 0.07865168539325842
+    },
+    {
+      "mean_predicted": 0.334384947589647,
+      "observed_rate": 0.17045454545454544
+    },
+    {
+      "mean_predicted": 0.5074637145710409,
+      "observed_rate": 0.2727272727272727
+    },
+    {
+      "mean_predicted": 0.7352296177919821,
+      "observed_rate": 0.7303370786516854
+    },
+    {
+      "mean_predicted": 0.9392093577025843,
+      "observed_rate": 0.8636363636363636
+    },
+    {
+      "mean_predicted": 0.9898637074862968,
+      "observed_rate": 0.9887640449438202
+    }
+  ],
+  "risk_bands": [
+    {
+      "band": "Low",
+      "n": 524,
+      "observed_dropout_rate": 0.05725190839694656
+    },
+    {
+      "band": "Medium",
+      "n": 132,
+      "observed_dropout_rate": 0.3787878787878788
+    },
+    {
+      "band": "High",
+      "n": 229,
+      "observed_dropout_rate": 0.8908296943231441
+    }
+  ],
+  "uncertainty": {
+    "method": "90% interval from 30 bootstrap re-fits of the champion model (Efron & Tibshirani, 1993)",
+    "mean_interval_width": 0.13311217510980283,
+    "share_uncertain": 0.12316384180790961,
+    "error_rate_when_uncertain": 0.30275229357798167,
+    "error_rate_when_confident": 0.07474226804123711,
+    "definition": "A case is 'uncertain' when its 90% interval crosses the decision threshold."
+  },
+  "errors": {
+    "counts": {
+      "true_positive": 229,
+      "false_negative": 55,
+      "false_positive": 36,
+      "true_negative": 565
+    },
+    "profile_means": {
+      "caught_dropouts_TP": {
+        "Curricular units 1st sem (approved)": 1.925764192139738,
+        "Curricular units 1st sem (grade)": 6.382657934011646,
+        "Tuition fees up to date": 0.5589519650655022,
+        "Debtor": 0.28820960698689957,
+        "Scholarship holder": 0.08296943231441048,
+        "Age at enrollment": 27.729257641921397,
+        "Admission grade": 123.34672489082969
+      },
+      "missed_dropouts_FN": {
+        "Curricular units 1st sem (approved)": 4.6,
+        "Curricular units 1st sem (grade)": 10.364541791541793,
+        "Tuition fees up to date": 0.9454545454545454,
+        "Debtor": 0.07272727272727272,
+        "Scholarship holder": 0.16363636363636364,
+        "Age at enrollment": 22.854545454545455,
+        "Admission grade": 128.76
+      },
+      "false_alarms_FP": {
+        "Curricular units 1st sem (approved)": 2.4166666666666665,
+        "Curricular units 1st sem (grade)": 7.828721509971511,
+        "Tuition fees up to date": 0.8055555555555556,
+        "Debtor": 0.3055555555555556,
+        "Scholarship holder": 0.05555555555555555,
+        "Age at enrollment": 20.63888888888889,
+        "Admission grade": 127.29722222222225
+      }
+    },
+    "interpretation": "Missed dropouts (FN) typically look academically 'safe' (units passed and grades near the cohort average, fees paid): the 'silent dropout' the system targets is still the hardest case. These students need the human review layer, not just the score."
+  },
+  "global_importance": [
+    {
+      "feature": "Curricular units 2nd sem (approved)",
+      "mean_abs_shap": 1.2011696724219785
+    },
+    {
+      "feature": "Curricular units 1st sem (approved)",
+      "mean_abs_shap": 0.6939571151252469
+    },
+    {
+      "feature": "Tuition fees up to date",
+      "mean_abs_shap": 0.3630529481746338
+    },
+    {
+      "feature": "Curricular units 2nd sem (enrolled)",
+      "mean_abs_shap": 0.35481294659085066
+    },
+    {
+      "feature": "Course",
+      "mean_abs_shap": 0.3010788342909504
+    },
+    {
+      "feature": "Curricular units 2nd sem (grade)",
+      "mean_abs_shap": 0.2949219544289725
+    },
+    {
+      "feature": "Unemployment rate",
+      "mean_abs_shap": 0.2044013479296274
+    },
+    {
+      "feature": "Curricular units 1st sem (enrolled)",
+      "mean_abs_shap": 0.19102321989216933
+    },
+    {
+      "feature": "Father's occupation",
+      "mean_abs_shap": 0.18939273942208495
+    },
+    {
+      "feature": "Application mode",
+      "mean_abs_shap": 0.15972045191338544
+    },
+    {
+      "feature": "Curricular units 2nd sem (credited)",
+      "mean_abs_shap": 0.15477187011888807
+    },
+    {
+      "feature": "Curricular units 1st sem (grade)",
+      "mean_abs_shap": 0.14382746410107355
+    },
+    {
+      "feature": "Scholarship holder",
+      "mean_abs_shap": 0.1386013698363543
+    },
+    {
+      "feature": "Father's qualification",
+      "mean_abs_shap": 0.1376225417356553
+    },
+    {
+      "feature": "Mother's qualification",
+      "mean_abs_shap": 0.13658751528076768
+    }
+  ],
+  "latency": {
+    "p50_ms": 157.5644500007911,
+    "p95_ms": 181.29361500086816,
+    "target_ms": 200
+  },
+  "success_criteria": {
+    "dropout_f1_gt_0.82": true,
+    "precision_gt_0.78": true,
+    "recall_gt_0.80": true,
+    "latency_p95_lt_200ms": true
+  }
+}
