@@ -1,4 +1,4 @@
-// POST /api/copilot  — forwards one round of the co-pilot conversation to Anthropic's Messages API.
+// POST /api/copilot  — forwards one round of the co-pilot conversation to the configured LLM (Gemini by default).
 // The page runs the agent loop and executes the tools itself (they call the trained model in the browser);
 // this function only holds the API key, adds the fixed safety rules, and caps size and rate.
 const { rateLimit, body, send } = require("./_lib");
@@ -18,8 +18,9 @@ module.exports = async (req, res) => {
   const raw = JSON.stringify({ system: b.system, messages, tools: b.tools });
   if (raw.length > 200000) return send(res, 413, { error: "too_large", message: "Conversation too long. Start a new chat." });
   const tools = Array.isArray(b.tools) ? b.tools.slice(0, 10).map(t => ({ name: String(t.name).slice(0, 64), description: String(t.description || "").slice(0, 1000), input_schema: t.input_schema || { type: "object", properties: {} } })) : undefined;
+  const toolChoice = b.tool_choice === "none" ? "none" : "auto";
   if (provider === "gemini") {
-    const out = await geminiRound(key, FIXED_RULES + "\n\n" + String(b.system || "").slice(0, 12000), messages, tools);
+    const out = await geminiRound(key, FIXED_RULES + "\n\n" + String(b.system || "").slice(0, 12000), messages, tools, { toolChoice });
     if (out.error) return send(res, out.status || 502, { error: out.error, message: out.message });
     return send(res, 200, out);
   }
@@ -27,7 +28,7 @@ module.exports = async (req, res) => {
     const r = await fetch((process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com") + "/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: process.env.COPILOT_MODEL || "claude-haiku-5-5", max_tokens: 1200,
+      body: JSON.stringify({ model: process.env.COPILOT_MODEL || "claude-haiku-5-5", max_tokens: 2048, ...(tools && toolChoice === "none" ? { tool_choice: { type: "none" } } : {}),
         system: FIXED_RULES + "\n\n" + String(b.system || "").slice(0, 12000), messages, ...(tools ? { tools } : {}) }),
     });
     const j = await r.json();

@@ -349,15 +349,29 @@ function webSample(input, opts = {}) {
       const words = add.split(/(\s+)/);
       for (let i = 0; i < words.length; i += 6) { if (opts.signal && opts.signal.aborted) break; shown += words.slice(i, i + 6).join(""); opts.onText && opts.onText({ text: shown, delta: "" }); await new Promise(r => setTimeout(r, 16)); }
     };
-    for (let round = 0; round < 6; round++) {
-      if (opts.signal && opts.signal.aborted) throw { code: "cancelled", text: shown };
-      let j;
-      try { j = await api("/api/copilot", { method: "POST", body: JSON.stringify({ system, messages, tools }), signal: opts.signal }); }
+    const MAX_ROUNDS = 8, NUDGE = "Now answer the advisor's question in plain English, using only the tool results above. Do not call any more tools.";
+    let finalRound = false;
+    const post = async (choice) => {
+      try { return await api("/api/copilot", { method: "POST", body: JSON.stringify({ system, messages, tools, tool_choice: choice }), signal: opts.signal }); }
       catch (e) { if (opts.signal && opts.signal.aborted) throw { code: "cancelled", text: shown }; throw { ...e, text: shown || undefined }; }
+    };
+    // Ask for a text-only answer from the evidence gathered so far (used when a round comes back empty or the round limit is reached).
+    const answerNow = async () => {
+      if (finalRound) return; finalRound = true;
+      const last = messages[messages.length - 1];
+      if (last && last.role === "user" && Array.isArray(last.content)) last.content = [...last.content, { type: "text", text: NUDGE }];
+      else messages.push({ role: "user", content: NUDGE });
+      const j = await post("none");
+      const text = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+      if (text.trim()) { const add = (full ? "\n\n" : "") + text; full += add; await reveal(add); }
+    };
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      if (opts.signal && opts.signal.aborted) throw { code: "cancelled", text: shown };
+      const j = await post("auto");
       const blocks = j.content || [], text = blocks.filter(b => b.type === "text").map(b => b.text).join("");
       if (text.trim()) { const add = (full ? "\n\n" : "") + text; full += add; await reveal(add); }
       const uses = blocks.filter(b => b.type === "tool_use");
-      if (j.stop_reason !== "tool_use" || !uses.length) break;
+      if (j.stop_reason !== "tool_use" || !uses.length) { if (!text.trim() && round > 0) await answerNow(); break; }
       messages.push({ role: "assistant", content: blocks });
       const results = [];
       for (const u of uses) {
@@ -367,6 +381,7 @@ function webSample(input, opts = {}) {
         results.push({ type: "tool_result", tool_use_id: u.id, content: content.slice(0, 30000), ...(is_error ? { is_error: true } : {}) });
       }
       messages.push({ role: "user", content: results });
+      if (round === MAX_ROUNDS - 1) await answerNow();   // out of rounds: answer from what the tools returned
     }
     if (!full.trim()) throw { code: "empty_completion" };
     if (shown !== full) { shown = full; opts.onText && opts.onText({ text: full, delta: "" }); }
@@ -899,7 +914,7 @@ Tools are unavailable in this view, so here is the selected student's data: ${JS
         ${m.done ? `<div class="msg-tools"><span>Was this helpful?</span><button type="button" data-rate="${i}:1" aria-pressed="${m.rated === 1}">Helpful</button><button type="button" data-rate="${i}:0" aria-pressed="${m.rated === 0}">Not helpful</button><button type="button" data-copy="${i}">Copy</button>${m.ratedMsg ? `<span>${esc(m.ratedMsg)}</span>` : ""}</div>` : ""}</div>`).join("");
     if (atBottom || busy) el.scrollTop = el.scrollHeight;
   }
-  const ERR = { authentication_error: "The AI provider rejected the API key saved in Vercel. Check GEMINI_API_KEY.", model_not_found: "No AI model is available for this key. Set GEMINI_MODEL in Vercel.", bad_code: "Wrong advisor access code.", not_configured: "The co-pilot isn't configured on this deployment.", too_large: "The conversation is too long. Start a new chat.",  overloaded_error: "The AI service is very busy right now. Wait a few seconds and ask again.", not_granted: "Claude access was declined for this page, so the co-pilot is off for this visit.", sampling_disabled: "Claude is not available for this account.", rate_limited: "Too many requests right now. Wait a moment and ask again.",
+  const ERR = { empty_completion: "The co-pilot checked the model but did not write an answer. Ask again, or try a narrower question.", rate_limited: "Too many co-pilot requests in a short time. Wait a few minutes and ask again.", authentication_error: "The AI provider rejected the API key saved in Vercel. Check GEMINI_API_KEY.", model_not_found: "No AI model is available for this key. Set GEMINI_MODEL in Vercel.", bad_code: "Wrong advisor access code.", not_configured: "The co-pilot isn't configured on this deployment.", too_large: "The conversation is too long. Start a new chat.",  overloaded_error: "The AI service is very busy right now. Wait a few seconds and ask again.", not_granted: "Claude access was declined for this page, so the co-pilot is off for this visit.", sampling_disabled: "Claude is not available for this account.", rate_limited: "Too many requests right now. Wait a moment and ask again.",
     session_expired: "Your claude.ai session expired. Sign in again.", refused: "Claude declined that request. Try rephrasing it.", tools_unavailable: "Tools are unavailable here.", prompt_too_large: "The conversation is too long. Start a new chat." };
   async function ask(q) {
     q = String(q || "").trim(); if (!q || busy) return;

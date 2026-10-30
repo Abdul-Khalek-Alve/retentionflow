@@ -5,7 +5,7 @@
 const BASE = () => (process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com") + "/v1beta/models/";
 const MODELS = () => [process.env.GEMINI_MODEL, "gemini-flash-latest", "gemini-3.6-flash", "gemini-2.5-flash"].filter(Boolean);
 
-function toGemini(system, messages, tools) {
+function toGemini(system, messages, tools, opts = {}) {
   const names = {};                                  // tool_use_id -> function name
   const contents = messages.map(m => {
     const role = m.role === "assistant" ? "model" : "user";
@@ -24,8 +24,9 @@ function toGemini(system, messages, tools) {
     }).filter(p => !(p.text === "" && Object.keys(p).length === 1));
     return { role, parts };
   });
-  const body = { contents, systemInstruction: { parts: [{ text: system }] }, generationConfig: { maxOutputTokens: 1200, temperature: 0.3 } };
+  const body = { contents, systemInstruction: { parts: [{ text: system }] }, generationConfig: { maxOutputTokens: Number(process.env.GEMINI_MAX_TOKENS) || 8192, temperature: 0.3 } };   // thinking models spend part of this budget before they write
   if (tools && tools.length) body.tools = [{ functionDeclarations: tools.map(t => ({ name: t.name, description: t.description, parametersJsonSchema: t.input_schema })) }];
+  if (body.tools && opts.toolChoice === "none") body.toolConfig = { functionCallingConfig: { mode: "NONE" } };   // "answer now" round: text only
   return body;
 }
 
@@ -69,8 +70,8 @@ async function callOnce(key, model, mode, body) {
   try { const r = await fetch(u, { method: "POST", headers: h, body }); return { status: r.status, ok: r.ok, j: await r.json().catch(() => ({})) }; }
   catch (e) { return { status: 0, ok: false, j: { error: { message: "Could not reach the Gemini API: " + (e && e.message) } } }; }
 }
-async function geminiRound(key, system, messages, tools) {
-  const body = JSON.stringify(toGemini(system, messages, tools));
+async function geminiRound(key, system, messages, tools, opts = {}) {
+  const body = JSON.stringify(toGemini(system, messages, tools, opts));
   if (WORKING) {                                    // fast path once a combination is known to work
     const r = await callOnce(key, WORKING.model, WORKING.mode, body);
     if (r.ok) return fromGemini(r.j, WORKING.model);
