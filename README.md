@@ -1,7 +1,7 @@
 # RetentionFlow AI — AI Service (ICT605 Group Project, NONAME 06)
 
 The Python service that holds all of RetentionFlow AI's machine learning. The
-Lovable dashboard calls this API; it never calculates risk itself.
+web dashboard calls this API; it never calculates risk itself.
 
 | What | Where |
 |---|---|
@@ -11,7 +11,7 @@ Lovable dashboard calls this API; it never calculates risk itself.
 | Report figures | `make_figures.py` → `artifacts/figures/` |
 | REST API | `app.py` (FastAPI, docs at `/docs`) |
 | End-to-end check | `smoke_test.py` |
-| Deployment | `.replit` (Replit) or `Dockerfile` (Render / Hugging Face Spaces) |
+| Deployment | `Dockerfile` (Render / Hugging Face Spaces) |
 
 ## 1. Run it locally (≈5 minutes)
 
@@ -87,13 +87,9 @@ numbers can shift slightly between scikit-learn versions.
 
 ## 6. Deploy
 
-**Replit**: import this folder (or its GitHub repo), press **Run**, then **Deploy →
-Autoscale** (or Reserved VM). The build step installs the requirements and runs
-`train.py`. Copy the `https://….replit.app` URL into the Lovable app's
-`src/config.ts`.
-
-**Fallback (Docker)**: Render → New Web Service → this repo → Docker, or a
-Hugging Face Space with the Docker SDK (set the port to 8000).
+**Docker**: Render → New Web Service → this repo → Docker, or a Hugging Face
+Space with the Docker SDK (set the port to 8000). Then point the dashboard at
+the deployed API URL.
 
 ## 7. Acknowledgements
 

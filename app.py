@@ -5,7 +5,7 @@ Interactive docs: http://localhost:8000/docs
 
 The API is read-only and stateless: it holds no personal data beyond the
 public UCI dataset. Advisor actions / audit logs live in the frontend's
-database (Lovable Cloud / Supabase), not here.
+database, not here.
 """
 from __future__ import annotations
 

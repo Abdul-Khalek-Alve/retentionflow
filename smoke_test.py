@@ -1,5 +1,5 @@
 """End-to-end smoke test. Local:  python smoke_test.py
-Against a deployment:            python smoke_test.py https://your-app.replit.app
+Against a deployment:            python smoke_test.py https://your-api-url
 """
 import sys
 import time
