@@ -94,5 +94,5 @@ the deployed API URL.
 ## 7. Acknowledgements
 
 scikit-learn, SHAP, FastAPI, pandas, NumPy, Matplotlib. Generative AI assistance
-(Claude) was used to help draft code and documentation. All results were
+(Claude) was used to help to solve problems and address de-bugging. All results were
 produced by running the code above.
