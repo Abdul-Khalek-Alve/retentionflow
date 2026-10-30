@@ -181,6 +181,20 @@ i.up { background: var(--high); } i.down { background: var(--low); } i.oth { bac
 .rubric .scale input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .rubric .scale label:has(input:checked) { background: var(--ai); color: var(--surface); border-color: var(--ai); }
 .rubric .scale label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* ---- advisor decisions + feedback loop ---- */
+.chip.case.open { color: var(--ai); border-color: var(--ai); background: var(--ai-soft); }
+.chip.case.late { color: var(--high); border-color: var(--high); background: var(--high-soft); font-weight: 600; }
+.chip.case.closed { color: var(--low); border-color: var(--low); background: var(--low-soft); }
+.radios.tags label { font-size: .8rem; padding: 4px 9px; }
+.radios.tags label:has(input:checked), .radios label:has(input[type=radio]:checked) { border-color: var(--ai); background: var(--ai-soft); }
+.hist-item.outcome { border-left: 3px solid var(--low); padding-left: 8px; }
+.loop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .84rem; }
+.loop span { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-weight: 600; }
+.loop i { font-style: normal; color: var(--muted); }
+.signals { list-style: none; padding: 0; margin: 10px 0 6px; display: grid; gap: 8px; }
+.signals li { border-left: 3px solid var(--ai); background: var(--ai-soft); padding: 8px 12px; border-radius: 0 8px 8px 0; font-size: .88rem; }
+.signals li.warn { border-left-color: var(--med); background: var(--med-soft); }
+.signals li.good { border-left-color: var(--low); background: var(--low-soft); }
 .hist-item { border-top: 1px solid var(--line); padding-top: 8px; font-size: .86rem; }
 .subtabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .subtabs button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: .86rem; }

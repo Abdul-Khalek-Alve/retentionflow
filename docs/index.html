@@ -181,6 +181,20 @@ i.up { background: var(--high); } i.down { background: var(--low); } i.oth { bac
 .rubric .scale input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .rubric .scale label:has(input:checked) { background: var(--ai); color: var(--surface); border-color: var(--ai); }
 .rubric .scale label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* ---- advisor decisions + feedback loop ---- */
+.chip.case.open { color: var(--ai); border-color: var(--ai); background: var(--ai-soft); }
+.chip.case.late { color: var(--high); border-color: var(--high); background: var(--high-soft); font-weight: 600; }
+.chip.case.closed { color: var(--low); border-color: var(--low); background: var(--low-soft); }
+.radios.tags label { font-size: .8rem; padding: 4px 9px; }
+.radios.tags label:has(input:checked), .radios label:has(input[type=radio]:checked) { border-color: var(--ai); background: var(--ai-soft); }
+.hist-item.outcome { border-left: 3px solid var(--low); padding-left: 8px; }
+.loop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .84rem; }
+.loop span { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-weight: 600; }
+.loop i { font-style: normal; color: var(--muted); }
+.signals { list-style: none; padding: 0; margin: 10px 0 6px; display: grid; gap: 8px; }
+.signals li { border-left: 3px solid var(--ai); background: var(--ai-soft); padding: 8px 12px; border-radius: 0 8px 8px 0; font-size: .88rem; }
+.signals li.warn { border-left-color: var(--med); background: var(--med-soft); }
+.signals li.good { border-left-color: var(--low); background: var(--low-soft); }
 .hist-item { border-top: 1px solid var(--line); padding-top: 8px; font-size: .86rem; }
 .subtabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .subtabs button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: .86rem; }
@@ -552,7 +566,7 @@ function viewTriage() {
   </section>
   <section class="panel stack">
     <div class="headrow"><div><h3>Contact first today</h3><p class="small muted">Flagged students where the model sees the most room for support to help: risk × the largest drop one support lever could make.</p></div><button class="btn" data-ask="Who should I contact first today, and why? Use the tools to check the top candidates.">Ask the co-pilot why</button></div>
-    <div class="prio">${priorities().slice(0, 5).map(p => `<button data-openid="${p.id}" aria-label="Open ${p.id}"><span class="row" style="justify-content:space-between"><span class="mono" style="font-weight:600">${p.id}</span>${bandHTML(p.band)}</span>
+    <div class="prio">${priorities().slice(0, 5).map(p => `<button data-openid="${p.id}" aria-label="Open ${p.id}"><span class="row" style="justify-content:space-between"><span class="mono" style="font-weight:600">${p.id}</span>${bandHTML(p.band)}</span>${caseChip(p.id) ? `<span style="display:block;margin-top:4px">${caseChip(p.id)}</span>` : ""}
       <span class="mono" style="font-size:1.35rem;font-weight:600">${pct(p.risk)}</span><span class="why">${esc(course(BY_ID[p.id].Course))}</span>
       <span class="why"><strong style="color:var(--ink)">${esc(p.lever)}</strong> could lower risk by <span class="mono" style="color:var(--low)">${(p.drop * 100).toFixed(0)} pts</span></span></button>`).join("")}</div>
   </section>
@@ -577,7 +591,7 @@ function viewTriage() {
       <tbody>${slice.map(r => { const s = sc(r.id); return `<tr class="click" data-id="${r.id}" tabindex="0">
         <td class="mono">${r.id}</td><td>${esc(course(r.Course))}</td>
         <td><div class="riskcell"><span class="mono" style="width:3.2em">${pct(s.risk)}</span><span class="mini"><span class="rng" style="left:${s.lo * 100}%;width:${Math.max((s.hi - s.lo) * 100, 1)}%"></span><span class="pt" style="left:calc(${s.risk * 100}% - 1.5px)"></span></span></div></td>
-        <td>${bandHTML(s.band)}</td><td>${s.uncertain ? `<span class="chip unc">Uncertain</span>` : ""} ${s.flagged ? `<span class="chip">Flagged</span>` : ""}</td>
+        <td>${bandHTML(s.band)}</td><td>${s.uncertain ? `<span class="chip unc">Uncertain</span>` : ""} ${s.flagged ? `<span class="chip">Flagged</span>` : ""} ${caseChip(r.id)}</td>
         <td class="r mono">${r[passedCol]}</td><td>${r["Tuition fees up to date"] ? "Yes" : "No"}</td>${S.reveal ? `<td>${esc(r.Target)}</td>` : ""}</tr>`; }).join("") || `<tr><td colspan="8" class="muted">No students match these filters.</td></tr>`}</tbody>
     </table></div>
     <div class="pager"><span class="small muted">Page ${S.page + 1} of ${pages}</span><div class="row"><button class="btn" id="pg-prev" ${S.page === 0 ? "disabled" : ""}>Previous</button><button class="btn" id="pg-next" ${S.page >= pages - 1 ? "disabled" : ""}>Next</button></div></div>
@@ -767,42 +781,172 @@ function webSample(input, opts = {}) {
   })();
 }
 webSample.limits = async () => ({ maxPromptBytes: 200000, tools: { maxCount: 10 } });
+/* ---------------- Advisor records: the shared store when connected, otherwise this browser ----------------
+   Three append-only record kinds: reviews (advisor decisions), outcomes (what happened at follow-up) and
+   ratings (co-pilot answer quality). Nothing is ever edited or deleted, so the log doubles as an audit trail. */
+const LOCAL = {
+  get(kind) { try { return JSON.parse(localStorage.getItem("rf-log-" + kind) || "[]"); } catch (e) { return []; } },
+  add(kind, item) { const all = LOCAL.get(kind); all.unshift(item); try { localStorage.setItem("rf-log-" + kind, JSON.stringify(all.slice(0, 2000))); } catch (e) { throw { code: "local_unavailable" }; } return item; },
+};
+S.outcomes = []; S.copilotRatings = []; S.storeMode = "loading";
+const asReview = i => ({ ...i, reviewer: i.advisor || i.reviewer || "Advisor", reviewerName: i.advisor || i.reviewerName || "Advisor" });
 let webPoll = null;
 async function webLoad() {
-  const [rv, rt] = await Promise.all([api("/api/store?kind=reviews"), api("/api/store?kind=ratings")]);
-  S.reviews = (rv.items || []).map(i => ({ ...i, reviewer: i.advisor || "Advisor", reviewerName: i.advisor || "Advisor" }));
-  S.copilotRatings = rt.items || [];
+  if (S.storeMode === "local") { S.reviews = LOCAL.get("reviews").map(asReview); S.outcomes = LOCAL.get("outcomes"); S.copilotRatings = LOCAL.get("ratings"); return; }
+  const get = k => api("/api/store?kind=" + k);
+  const [rv, rt, oc] = await Promise.all([get("reviews"), get("ratings"), get("outcomes").catch(() => ({ items: [] }))]);
+  S.reviews = (rv.items || []).map(asReview); S.copilotRatings = rt.items || []; S.outcomes = oc.items || [];
 }
 async function initWeb() {
   try { Object.assign(WEBCFG, await api("/api/health")); } catch (e) {}
-  if (WEBCFG.store) {
-    try { await webLoad(); S.dbState = "ready"; S.uid = "web"; } catch (e) { S.dbState = "off"; }
-    clearInterval(webPoll); webPoll = setInterval(async () => { if (document.hidden) return; try { const before = S.reviews.length + "/" + (S.copilotRatings || []).length; await webLoad(); if (before !== S.reviews.length + "/" + S.copilotRatings.length && ["student", "feedback"].includes(S.view)) render(true); } catch (e) {} }, 20000);
-  } else S.dbState = "off";
-  if (["student", "feedback"].includes(S.view)) render(true);
+  S.storeMode = WEBCFG.store ? "shared" : "local";
+  try { await webLoad(); } catch (e) { S.storeMode = "local"; await webLoad(); }
+  S.dbState = "ready"; S.uid = "web";
+  if (S.storeMode === "shared") {
+    clearInterval(webPoll);
+    webPoll = setInterval(async () => {
+      if (document.hidden) return;
+      try { const before = [S.reviews, S.outcomes, S.copilotRatings].map(x => x.length).join("/"); await webLoad();
+        if (before !== [S.reviews, S.outcomes, S.copilotRatings].map(x => x.length).join("/") && ["student", "feedback", "triage"].includes(S.view)) render(true); } catch (e) {}
+    }, 20000);
+  }
+  render(true);
 }
+// The single write path for every record kind.
+const DB_COLLECTION = { reviews: "reviews", outcomes: "outcomes", ratings: "copilot" };
+async function appendRecord(kind, item) {
+  if (WEB && S.storeMode === "shared") { const r = await api("/api/store?kind=" + kind, { method: "POST", body: JSON.stringify(item) }); return r.item; }
+  if (WEB) return LOCAL.add(kind, { ...item, at: new Date().toISOString() });
+  const ref = DB.doc(DB_COLLECTION[kind] + "/" + S.uid), cur = await ref.get();       // artifact database: one document per advisor
+  const items = (cur.exists && cur.data().items) ? [...cur.data().items] : [];
+  const rec = { ...item, at: new Date().toISOString() }; items.push(rec); await ref.set({ items: items.slice(-400) }); return rec;
+}
+const storeNote = () => WEB && S.storeMode === "local" ? `<p class="notice warn small"><strong>Saved in this browser only.</strong> No shared store is connected to this deployment, so reviews and outcomes stay on this device. Download them from Advisor feedback, or connect Upstash Redis in Vercel to share them between advisors.</p>` : "";
 
-/* ---------------- Advisor review (shared db) ---------------- */
-const ACTIONS = { none: "No action", monitor: "Monitor", academic_support: "Academic support", financial_counselling: "Financial counselling", wellbeing_referral: "Wellbeing referral" };
+/* ---------------- Advisor decision workflow ---------------- */
+const BANDS = ["Low", "Medium", "High"];
+const ASSESS = { agree: "Agree with the AI", lower: "Risk is lower than the AI says", higher: "Risk is higher than the AI says", override: "Set the band myself" };
+const ACTIONS = { contact_now: "Contact the student now", check_in: "Book a check-in meeting", financial_counselling: "Refer: financial counselling", academic_support: "Refer: academic support", wellbeing_referral: "Refer: wellbeing service", monitor: "Monitor only", none: "No action needed" };
+const PRIORITY = { urgent: "Urgent (48 hours)", week: "This week", month: "This month" };
+const TAGS = { personal: "Personal circumstances I know about", finance_changed: "Financial situation has changed", academic_changed: "Academic progress has changed", engagement: "Engagement or attendance concerns", data_issue: "Record looks out of date or wrong", explanation: "The explanation did not make sense", other: "Other" };
+const OUTCOMES = { support_accepted: "Contacted: support accepted", support_declined: "Contacted: support declined", not_reached: "Could not reach the student", resolved: "Situation resolved", still_at_risk: "Still at risk", withdrew: "Student withdrew" };
+const CLOSES = ["support_accepted", "resolved", "withdrew"];
 const RUBRIC = [["clarity", "Clarity", "I understood why the model gave this score"], ["usefulness", "Usefulness", "The explanation helped me decide what to do"], ["trust", "Trust", "I trust this estimate for this student"], ["actionability", "Actionability", "It points to something I can act on"]];
-function reviewCard(row, s) {
-  const mine = S.reviews.filter(r => r.student_id === row.id).sort((a, b) => b.at.localeCompare(a.at));
-  const hist = mine.length ? mine.map(r => `<div class="hist-item"><span class="mono small">${esc(r.at.slice(0, 16).replace("T", " "))}</span> · <strong>${esc(r.reviewerName || "Advisor")}</strong> · ${esc(r.decision)}${r.override_band ? ` → ${esc(r.override_band)}` : ""} · ${esc(ACTIONS[r.planned_action] || r.planned_action)} <span class="muted">(AI said ${pct(r.ai_risk)}, ${esc(r.checkpoint)})</span>${r.reason ? `<br><span class="muted">${esc(r.reason)}</span>` : ""}</div>`).join("") : `<p class="small muted">No reviews recorded for this student yet.</p>`;
-  if (S.dbState !== "ready") return `<div class="panel stack"><h3>Advisor review</h3><p class="small muted">${S.dbState === "loading" ? "Connecting to the shared review log…" : WEB ? "The shared review log isn't connected on this deployment yet. The owner needs to connect an Upstash Redis store in Vercel." : "Reviews are saved to a shared, signed-in log. Open this page while signed in to claude.ai to record a review."}</p>${hist}</div>`;
-  return `<form class="panel stack" id="review-form" novalidate>
-    <div class="headrow"><h3>Advisor review</h3><span class="small muted">Saved to the shared audit log</span></div>
-    <div class="field"><span class="lbl" id="dec-l">Do you agree with the AI's assessment?</span>
-      <div class="radios" role="radiogroup" aria-labelledby="dec-l">${[["agree", "Agree"], ["disagree", "Disagree"], ["override", "Override band"]].map(([v, l]) => `<label><input type="radio" name="decision" value="${v}" id="dec-${v}" ${v === "agree" ? "checked" : ""}> ${l}</label>`).join("")}</div></div>
-    <div class="row" id="ovr-row" hidden><div class="field"><label for="ovr-band">Your band</label><select id="ovr-band"><option>Low</option><option>Medium</option><option>High</option></select></div></div>
-    <div class="field"><label for="rv-reason">Reason <span id="reason-req" hidden>(required for an override or disagreement)</span></label><textarea id="rv-reason" maxlength="600" placeholder="What do you know that the model does not?"></textarea></div>
-    <div class="field"><label for="rv-action">Planned action</label><select id="rv-action">${Object.entries(ACTIONS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
-      <span class="small muted">Nothing is sent to the student. This only records your decision.</span></div>
-    <div class="field"><span class="lbl">Explanation quality (1 = poor, 5 = excellent)</span>
-      <div class="rubric">${RUBRIC.map(([k, n, d]) => `<div><strong class="small">${n}</strong><br><span class="small muted">${d}</span></div><div class="scale" role="radiogroup" aria-label="${n}">${[1, 2, 3, 4, 5].map(v => `<label><input type="radio" name="rb-${k}" value="${v}" id="rb-${k}-${v}" ${v === 3 ? "checked" : ""}>${v}</label>`).join("")}</div>`).join("")}</div></div>
-    ${WEB ? `<div class="row"><div class="field" style="flex:1 1 180px"><label for="rv-name">Your name (shown in the audit log)</label><input type="text" id="rv-name" maxlength="60" value="${esc(ident.name)}" autocomplete="name"></div>${WEBCFG.code_required ? `<div class="field" style="flex:1 1 140px"><label for="rv-code">Advisor access code</label><input type="password" id="rv-code" maxlength="60" value="${esc(ident.code)}" autocomplete="off"></div>` : ""}</div>` : ""}
-    <div class="row"><button class="btn primary" type="submit" id="rv-save">Save review</button><span class="small" id="rv-msg" role="status"></span></div>
-    <div><div class="eyebrow" style="margin-bottom:4px">Review history</div>${hist}</div>
+const shiftBand = (b, d) => BANDS[Math.min(2, Math.max(0, BANDS.indexOf(b) + d))];
+const assessOf = r => r.decision === "disagree" ? (r.direction === "lower" ? "lower" : r.direction === "higher" ? "higher" : "disagree") : r.decision;
+const advisorBand = r => r.decision === "override" ? (r.override_band || r.ai_band) : r.decision === "disagree" ? (r.direction === "lower" ? shiftBand(r.ai_band, -1) : r.direction === "higher" ? shiftBand(r.ai_band, 1) : r.ai_band) : r.ai_band;
+const bandMove = r => Math.sign(BANDS.indexOf(advisorBand(r)) - BANDS.indexOf(r.ai_band));      // +1 advisor raised, −1 lowered, 0 same
+const today = () => new Date().toISOString().slice(0, 10);
+const plusDays = n => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+const newest = (a, b) => String(b.at).localeCompare(String(a.at));
+const assessText = r => ({ agree: "Agreed", lower: "Said lower", higher: "Said higher", override: "Set band", disagree: "Disagreed" }[assessOf(r)] || r.decision);
+function caseOf(id) {
+  const rv = S.reviews.filter(r => r.student_id === id).sort(newest); if (!rv.length) return null;
+  const last = rv[0], oc = S.outcomes.filter(o => o.student_id === id && String(o.at) >= String(last.at)).sort(newest);
+  const closed = last.planned_action === "none" || oc.some(o => o.closed);
+  const overdue = !closed && last.follow_up && last.follow_up < today();
+  return { last, reviews: rv, outcomes: oc, closed, overdue, status: closed ? "Closed" : overdue ? "Follow-up overdue" : "Open case" };
+}
+const caseChip = id => { const c = caseOf(id); return c ? `<span class="chip case ${c.closed ? "closed" : c.overdue ? "late" : "open"}">${c.status}</span>` : ""; };
+
+function timeline(c) {
+  if (!c) return `<p class="small muted">No reviews recorded for this student yet.</p>`;
+  const ev = [...c.reviews.map(r => ({ t: "review", r })), ...S.outcomes.filter(o => o.student_id === c.last.student_id).map(o => ({ t: "outcome", r: o }))].sort((a, b) => newest(a.r, b.r));
+  return ev.map(({ t, r }) => t === "review"
+    ? `<div class="hist-item"><span class="mono small">${esc(String(r.at).slice(0, 16).replace("T", " "))}</span> · <strong>${esc(r.reviewerName || r.advisor || "Advisor")}</strong> · ${esc(assessText(r))} (AI ${pct(r.ai_risk)} ${esc(r.ai_band)} → advisor ${esc(advisorBand(r))}) · ${esc(ACTIONS[r.planned_action] || r.planned_action)}${r.follow_up ? ` · follow up ${esc(r.follow_up)}` : ""}${(r.reason_tags || []).length ? `<br><span class="small">${r.reason_tags.map(k => `<span class="chip">${esc(TAGS[k] || k)}</span>`).join(" ")}</span>` : ""}${r.reason ? `<br><span class="muted">${esc(r.reason)}</span>` : ""}</div>`
+    : `<div class="hist-item outcome"><span class="mono small">${esc(String(r.at).slice(0, 16).replace("T", " "))}</span> · <strong>${esc(r.advisor || "Advisor")}</strong> · Outcome: ${esc(OUTCOMES[r.outcome] || r.outcome)}${r.closed ? " · case closed" : ""}${r.note ? `<br><span class="muted">${esc(r.note)}</span>` : ""}</div>`).join("");
+}
+function identityFields(pre) {
+  if (!WEB) return "";
+  return `<div class="row"><div class="field" style="flex:1 1 180px"><label for="${pre}-name">Your name (shown in the audit log)</label><input type="text" id="${pre}-name" maxlength="60" value="${esc(ident.name)}" autocomplete="name"></div>${WEBCFG.code_required && S.storeMode === "shared" ? `<div class="field" style="flex:1 1 140px"><label for="${pre}-code">Advisor access code</label><input type="password" id="${pre}-code" maxlength="60" value="${esc(ident.code)}" autocomplete="off"></div>` : ""}</div>`;
+}
+function outcomeCard(row, c) {
+  if (!c || c.closed) return "";
+  return `<form class="panel stack" id="outcome-form" novalidate>
+    <div class="headrow"><h3>Close the loop: record the follow-up</h3>${caseChip(row.id)}</div>
+    <p class="small">Planned: <strong>${esc(ACTIONS[c.last.planned_action] || c.last.planned_action)}</strong>${c.last.priority ? ` · ${esc(PRIORITY[c.last.priority] || c.last.priority)}` : ""}${c.last.follow_up ? ` · follow up by <span class="mono">${esc(c.last.follow_up)}</span>` : ""} · decided by ${esc(c.last.reviewerName || "Advisor")}.</p>
+    <div class="field"><label for="oc-outcome">What happened?</label><select id="oc-outcome">${Object.entries(OUTCOMES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
+    <div class="field"><label for="oc-note">Note (optional)</label><textarea id="oc-note" maxlength="400" placeholder="For example: agreed a fee plan with student finance on 12 Nov."></textarea></div>
+    <label class="small"><input type="checkbox" id="oc-close" checked> Close this case</label>
+    ${identityFields("oc")}
+    <div class="row"><button class="btn primary" type="submit" id="oc-save">Save outcome</button><span class="small" id="oc-msg" role="status"></span></div>
+    <p class="small muted">Outcomes are compared with the AI's original estimate on the Advisor feedback page, which is how the system learns where the model was right or wrong.</p>
   </form>`;
+}
+function reviewCard(row, s) {
+  const c = caseOf(row.id);
+  if (S.dbState !== "ready") return `<div class="panel stack"><h3>Advisor decision</h3><p class="small muted">${S.dbState === "loading" ? "Connecting to the review log…" : "Reviews are saved to a shared, signed-in log. Open this page while signed in to record a review."}</p>${timeline(c)}</div>`;
+  return `${outcomeCard(row, c)}<form class="panel stack" id="review-form" novalidate>
+    <div class="headrow"><h3>${c ? "Update your decision" : "Advisor decision"}</h3>${c ? caseChip(row.id) : `<span class="small muted">You make the final call</span>`}</div>
+    ${storeNote()}
+    <p class="small">The AI estimates <strong class="mono">${pct(s.risk)}</strong> (90% range ${pct(s.lo)}–${pct(s.hi)}), band <strong>${esc(s.band)}</strong>${s.flagged ? ", flagged for review" : ""}${s.uncertain ? `, and it is <strong>uncertain</strong>` : ""}.</p>
+    <div class="field"><span class="lbl" id="as-l">1 · Your assessment</span>
+      <div class="radios" role="radiogroup" aria-labelledby="as-l">${Object.entries(ASSESS).map(([v, l]) => `<label><input type="radio" name="assess" value="${v}" id="as-${v}" ${v === "agree" ? "checked" : ""}> ${l}</label>`).join("")}</div></div>
+    <div class="row" id="ovr-row" hidden><div class="field"><label for="ovr-band">Your band</label><select id="ovr-band">${BANDS.map(b => `<option ${b === s.band ? "selected" : ""}>${b}</option>`).join("")}</select></div></div>
+    <div class="field"><span class="lbl" id="tg-l">2 · Why? <span id="reason-req" hidden>(pick a reason or write one; required when you disagree)</span></span>
+      <div class="radios tags" role="group" aria-labelledby="tg-l">${Object.entries(TAGS).map(([k, v]) => `<label><input type="checkbox" name="tag" value="${k}"> ${v}</label>`).join("")}</div>
+      <textarea id="rv-reason" maxlength="600" placeholder="What do you know that the model does not?" aria-label="Reason"></textarea></div>
+    <div class="field"><span class="lbl">3 · Decision and follow-up</span>
+      <div class="row">
+        <div class="field" style="flex:2 1 220px"><label for="rv-action">Action</label><select id="rv-action">${Object.entries(ACTIONS).map(([k, v]) => `<option value="${k}" ${k === (s.flagged ? "contact_now" : "monitor") ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+        <div class="field" style="flex:1 1 150px" id="pri-f"><label for="rv-priority">Priority</label><select id="rv-priority">${Object.entries(PRIORITY).map(([k, v]) => `<option value="${k}" ${k === (s.band === "High" ? "urgent" : "week") ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+        <div class="field" style="flex:1 1 150px" id="fu-f"><label for="rv-follow">Follow up by</label><input type="date" id="rv-follow" value="${plusDays(s.band === "High" ? 7 : 14)}" min="${today()}"></div>
+      </div>
+      <span class="small muted">Nothing is sent to the student. This records your decision and puts the student in your caseload.</span></div>
+    <div class="field"><span class="lbl">4 · Rate the explanation (1 = poor, 5 = excellent)</span>
+      <div class="rubric">${RUBRIC.map(([k, n, d]) => `<div><strong class="small">${n}</strong><br><span class="small muted">${d}</span></div><div class="scale" role="radiogroup" aria-label="${n}">${[1, 2, 3, 4, 5].map(v => `<label><input type="radio" name="rb-${k}" value="${v}" id="rb-${k}-${v}" ${v === 3 ? "checked" : ""}>${v}</label>`).join("")}</div>`).join("")}</div></div>
+    ${identityFields("rv")}
+    <div class="row"><button class="btn primary" type="submit" id="rv-save">Save decision</button><span class="small" id="rv-msg" role="status"></span></div>
+    <div><div class="eyebrow" style="margin-bottom:4px">Case history</div>${timeline(c)}</div>
+  </form>`;
+}
+function syncReview(form) {
+  if (!form || form.id !== "review-form") return;
+  const a = form.querySelector("input[name=assess]:checked").value, act = form.querySelector("#rv-action").value;
+  form.querySelector("#ovr-row").hidden = a !== "override"; form.querySelector("#reason-req").hidden = a === "agree";
+  const noFollow = act === "none"; form.querySelector("#fu-f").hidden = noFollow; form.querySelector("#pri-f").hidden = noFollow;
+}
+function readIdentity(form, pre, msg) {
+  if (!WEB) { if (!S.uid) { msg.textContent = "Sign in to save decisions."; msg.style.color = "var(--high)"; return false; } return true; }
+  const nm = (form.querySelector("#" + pre + "-name") || {}).value || "";
+  if (!nm.trim()) { msg.textContent = "Add your name so the audit log shows who made this decision."; msg.style.color = "var(--high)"; form.querySelector("#" + pre + "-name").focus(); return false; }
+  ident.name = nm.trim(); const cd = form.querySelector("#" + pre + "-code"); if (cd) ident.code = cd.value.trim();
+  return true;
+}
+const saveError = e => e && e.code === "bad_code" ? "That access code is wrong. Ask the project owner for the advisor code." : e && e.code === "invalid_argument" ? "Your access level can view reviews but not add them." : e && e.code === "local_unavailable" ? "This browser is blocking local storage, so the decision could not be kept." : e && e.code === "rate_limited" ? "Too many saves in a short time. Wait a few minutes." : "Could not save. Check your connection and try again.";
+async function saveReview(form) {
+  const msg = form.querySelector("#rv-msg"), btn = form.querySelector("#rv-save");
+  const a = form.querySelector("input[name=assess]:checked").value, reason = form.querySelector("#rv-reason").value.trim();
+  const tags = [...form.querySelectorAll("input[name=tag]:checked")].map(x => x.value);
+  if (a !== "agree" && !reason && !tags.length) { msg.textContent = "Pick a reason or write one before saving a disagreement."; msg.style.color = "var(--high)"; form.querySelector("#rv-reason").focus(); return; }
+  if (!readIdentity(form, "rv", msg)) return;
+  const row = BY_ID[S.student], s = sc(row.id), act = form.querySelector("#rv-action").value;
+  const item = { id: Math.random().toString(36).slice(2, 10), student_id: row.id, checkpoint: S.cp, advisor: ident.name || undefined,
+    ai_risk: +s.risk.toFixed(4), ai_band: s.band, ai_uncertain: s.uncertain, ai_flagged: s.flagged,
+    decision: a === "lower" || a === "higher" ? "disagree" : a, direction: a === "lower" || a === "higher" ? a : null,
+    override_band: a === "override" ? form.querySelector("#ovr-band").value : null, reason_tags: tags, reason: reason.slice(0, 600),
+    planned_action: act, priority: act === "none" ? null : form.querySelector("#rv-priority").value, follow_up: act === "none" ? null : (form.querySelector("#rv-follow").value || null) };
+  RUBRIC.forEach(([k]) => item[k] = +form.querySelector(`input[name=rb-${k}]:checked`).value);
+  btn.disabled = true; msg.textContent = "Saving…"; msg.style.color = "";
+  try {
+    const saved = await appendRecord("reviews", item);
+    if (WEB) S.reviews.unshift(asReview({ ...item, ...saved }));
+    msg.textContent = WEB && S.storeMode === "local" ? "Decision saved in this browser." : "Decision saved to the audit log."; msg.style.color = "var(--low)";
+    setTimeout(() => render(true), 700);
+  } catch (e) { msg.textContent = saveError(e); msg.style.color = "var(--high)"; btn.disabled = false; }
+}
+async function saveOutcome(form) {
+  const msg = form.querySelector("#oc-msg"), btn = form.querySelector("#oc-save");
+  if (!readIdentity(form, "oc", msg)) return;
+  const c = caseOf(S.student); if (!c) return;
+  const item = { id: Math.random().toString(36).slice(2, 10), student_id: S.student, review_id: c.last.id, checkpoint: c.last.checkpoint, advisor: ident.name || undefined,
+    outcome: form.querySelector("#oc-outcome").value, note: form.querySelector("#oc-note").value.trim().slice(0, 400), closed: form.querySelector("#oc-close").checked };
+  btn.disabled = true; msg.textContent = "Saving…"; msg.style.color = "";
+  try {
+    const saved = await appendRecord("outcomes", item);
+    if (WEB) S.outcomes.unshift({ ...item, ...saved });
+    msg.textContent = "Outcome saved."; msg.style.color = "var(--low)"; setTimeout(() => render(true), 600);
+  } catch (e) { msg.textContent = saveError(e); msg.style.color = "var(--high)"; btn.disabled = false; }
 }
 let DB = null, USER = null;
 async function initDb() {
@@ -812,47 +956,24 @@ async function initDb() {
     [DB, USER] = await Promise.all([claude.use("db"), claude.use("user")]);
     if (!DB) throw 0;
     S.uid = USER ? await USER.id() : null;
-    S.dbState = "ready";
+    S.dbState = "ready"; S.storeMode = "shared";
     DB.collection("reviews").onSnapshot(async snap => {
       const items = [];
       snap.docs.forEach(d => { const data = d.data() || {}; (data.items || []).forEach(it => items.push({ ...it, reviewer: d.id })); });
       if (USER && items.length) { try { S.profiles = await USER.profiles([...new Set(items.map(i => i.reviewer))]); } catch (e) {} }
       items.forEach(i => i.reviewerName = (S.profiles[i.reviewer] && S.profiles[i.reviewer].name) || (i.reviewer === S.uid ? "You" : "Advisor"));
-      S.reviews = items; if (["student", "feedback"].includes(S.view)) render(true);
+      S.reviews = items; if (["student", "feedback", "triage"].includes(S.view)) render(true);
     }, () => { S.dbState = "off"; render(true); });
+    DB.collection("outcomes").onSnapshot(snap => {
+      const items = []; snap.docs.forEach(d => ((d.data() || {}).items || []).forEach(it => items.push({ ...it, advisor: it.advisor || ((S.profiles[d.id] || {}).name) || "Advisor" })));
+      S.outcomes = items; if (["student", "feedback", "triage"].includes(S.view)) render(true);
+    }, () => {});
     DB.collection("copilot").onSnapshot(snap => {
       const items = []; snap.docs.forEach(d => ((d.data() || {}).items || []).forEach(it => items.push(it)));
       S.copilotRatings = items; if (S.view === "feedback") render(true);
     }, () => {});
   } catch (e) { S.dbState = "off"; }
   if (["student", "feedback"].includes(S.view)) render(true);
-}
-async function saveReview(form) {
-  const msg = form.querySelector("#rv-msg"), btn = form.querySelector("#rv-save");
-  const decision = form.querySelector("input[name=decision]:checked").value, reason = form.querySelector("#rv-reason").value.trim();
-  if (decision !== "agree" && !reason) { msg.textContent = "Add a reason before saving a disagreement or override."; msg.style.color = "var(--high)"; form.querySelector("#rv-reason").focus(); return; }
-  if (WEB) {
-    const nm = (form.querySelector("#rv-name") || {}).value || ""; if (!nm.trim()) { msg.textContent = "Add your name so the audit log shows who made this decision."; msg.style.color = "var(--high)"; form.querySelector("#rv-name").focus(); return; }
-    ident.name = nm.trim(); const cd = form.querySelector("#rv-code"); if (cd) ident.code = cd.value.trim();
-  } else if (!S.uid) { msg.textContent = "Sign in to claude.ai to save reviews."; msg.style.color = "var(--high)"; return; }
-  const row = BY_ID[S.student], s = sc(row.id);
-  const item = { id: Math.random().toString(36).slice(2, 10), at: new Date().toISOString(), student_id: row.id, checkpoint: S.cp,
-    ai_risk: +s.risk.toFixed(4), ai_band: s.band, ai_uncertain: s.uncertain, decision,
-    override_band: decision === "override" ? form.querySelector("#ovr-band").value : null, reason: reason.slice(0, 600),
-    planned_action: form.querySelector("#rv-action").value };
-  RUBRIC.forEach(([k]) => item[k] = +form.querySelector(`input[name=rb-${k}]:checked`).value);
-  btn.disabled = true; msg.textContent = "Saving…"; msg.style.color = "";
-  try {
-    if (WEB) { const r = await api("/api/store?kind=reviews", { method: "POST", body: JSON.stringify({ ...item, advisor: ident.name }) }); S.reviews.unshift({ ...r.item, reviewer: r.item.advisor, reviewerName: r.item.advisor }); msg.textContent = "Review saved to the audit log."; msg.style.color = "var(--low)"; setTimeout(() => render(true), 600); return; }
-    const ref = DB.doc("reviews/" + S.uid), cur = await ref.get();
-    const items = (cur.exists && cur.data().items) ? [...cur.data().items] : [];
-    items.push(item);
-    await ref.set({ items: items.slice(-400) });
-    msg.textContent = "Review saved to the audit log."; msg.style.color = "var(--low)";
-  } catch (e) {
-    msg.textContent = e && e.code === "bad_code" ? "That access code is wrong. Ask the project owner for the advisor code." : e && e.code === "invalid_argument" ? "Your access level can view reviews but not add them. Ask the owner for Contributor access." : "Could not save. Check your connection and try again.";
-    msg.style.color = "var(--high)"; btn.disabled = false;
-  }
 }
 
 /* ---------------- Model & fairness ---------------- */
@@ -983,41 +1104,121 @@ function viewModel() {
     <div class="subtabs" role="group" aria-label="Model sections">${tabs.map(([k, l]) => `<button data-mt="${k}" aria-pressed="${S.modelTab === k}">${l}</button>`).join("")}</div></section>${body}`;
 }
 
-/* ---------------- Advisor feedback ---------------- */
+/* ---------------- Advisor feedback: the human–AI feedback loop ---------------- */
+const MIN_SIGNAL = 5;   // reviews needed before the page draws conclusions
+function implied(R, thr) {
+  // Advisor-implied review threshold: the cut-off on the AI's risk that best reproduces advisors' own "needs follow-up" judgement.
+  const pts = R.map(r => ({ p: r.ai_risk, y: advisorBand(r) !== "Low" })).filter(x => Number.isFinite(x.p));
+  if (pts.length < 8 || pts.every(x => x.y) || pts.every(x => !x.y)) return null;
+  const acc = t => pts.filter(x => (x.p >= t) === x.y).length / pts.length;
+  let best = { t: thr, a: acc(thr) };
+  for (let t = 0.05; t <= 0.951; t += 0.01) { const a = acc(t); if (a > best.a + 1e-9 || (Math.abs(a - best.a) < 1e-9 && Math.abs(t - thr) < Math.abs(best.t - thr))) best = { t, a }; }
+  return { t: best.t, a: best.a, base: acc(thr), n: pts.length };
+}
+function signals(R, O, imp, thr) {
+  const out = [], rate = (xs, f) => xs.length ? xs.filter(f).length / xs.length : 0;
+  if (R.length < MIN_SIGNAL) return [["info", `Collecting evidence: ${R.length} of ${MIN_SIGNAL} reviews needed before the page reports patterns.`]];
+  const low = R.filter(r => r.ai_band === "Low"), high = R.filter(r => r.ai_band === "High");
+  if (low.length >= 3 && rate(low, r => bandMove(r) > 0) >= 0.25) out.push(["warn", `Advisors raised the risk for ${pct(rate(low, r => bandMove(r) > 0))} of Low-band students they reviewed. The model may be missing silent dropouts: review false negatives and consider a lower threshold at the next retraining.`]);
+  if (high.length >= 3 && rate(high, r => bandMove(r) < 0) >= 0.25) out.push(["warn", `Advisors lowered the risk for ${pct(rate(high, r => bandMove(r) < 0))} of High-band students. Check these for false alarms before the next retraining.`]);
+  const unc = R.filter(r => r.ai_uncertain), con = R.filter(r => !r.ai_uncertain);
+  if (unc.length >= 2 && con.length >= 2) {
+    const du = rate(unc, r => r.decision !== "agree"), dc = rate(con, r => r.decision !== "agree");
+    out.push(du > dc + 0.1 ? ["good", `Advisors disagree more often when the model is uncertain (${pct(du)} against ${pct(dc)}), so the uncertainty flag is pointing human judgement where it is needed.`]
+      : ["info", `Disagreement is similar for uncertain (${pct(du)}) and confident (${pct(dc)}) predictions.`]);
+  }
+  const tag = k => R.filter(r => (r.reason_tags || []).includes(k)).length;
+  if (tag("data_issue") >= 2) out.push(["warn", `${tag("data_issue")} reviews say the student record looked out of date or wrong. Check data freshness before trusting new scores.`]);
+  if (tag("explanation") >= 2) out.push(["warn", `${tag("explanation")} reviews found the explanation unclear. Review the SHAP wording for these students.`]);
+  const mean = k => R.reduce((s, r) => s + (r[k] || 0), 0) / R.length;
+  if (mean("trust") < 3) out.push(["warn", `Mean trust is ${mean("trust").toFixed(1)} out of 5. Advisors are not relying on the estimates, which is safe but limits their value; look at the reasons given.`]);
+  const firstReview = id => R.filter(r => r.student_id === id).sort((a, b) => String(a.at).localeCompare(String(b.at)))[0];
+  const bad = O.filter(o => ["still_at_risk", "withdrew"].includes(o.outcome)).map(o => firstReview(o.student_id)).filter(r => r && r.ai_band === "Low");
+  if (bad.length) out.push(["warn", `${bad.length} student${bad.length > 1 ? "s" : ""} the model rated Low ${bad.length > 1 ? "were" : "was"} later still at risk or withdrew. ${bad.length > 1 ? "They are" : "This student is"} included in the retraining export as a missed case.`]);
+  if (imp && Math.abs(imp.t - thr) >= 0.05) out.push(["info", `Advisors' own decisions are best matched by a review threshold of about ${pct(imp.t)}, against the model's ${pct(thr)} (agreement ${pct(imp.a)} against ${pct(imp.base)} on ${imp.n} reviews). Treat this as a prompt to re-examine the threshold, not as a new threshold.`]);
+  if (!out.some(x => x[0] === "warn")) out.push(["good", "No systematic disagreement between advisors and the model so far."]);
+  return out;
+}
 function viewFeedback() {
-  const R = S.reviews;
-  if (S.dbState !== "ready") return `<section class="stack"><h2>Human–AI feedback loop</h2><div class="panel"><p>${S.dbState === "loading" ? "Connecting to the shared review log…" : (WEB ? "The shared review log isn't connected on this deployment yet. The owner needs to connect an Upstash Redis store in Vercel." : "The shared review log needs a signed-in claude.ai viewer. Open this page while signed in to see and add reviews.")}</p></div></section>`;
-  const n = R.length, mean = k => n ? R.reduce((s, r) => s + (r[k] || 0), 0) / n : 0;
-  const agree = R.filter(r => r.decision === "agree").length, over = R.filter(r => r.decision === "override").length, unc = R.filter(r => r.ai_uncertain).length;
-  const byBand = ["Low", "Medium", "High"].map(b => { const x = R.filter(r => r.ai_band === b); return { b, n: x.length, ov: x.filter(r => r.decision !== "agree").length }; });
-  const bars = RUBRIC.map(([k, nm]) => ({ k, nm, v: mean(k) }));
-  const CR = S.copilotRatings || [], helpful = CR.filter(r => r.helpful).length;
+  if (S.dbState !== "ready") return `<section class="stack"><h2>Human–AI feedback loop</h2><div class="panel"><p>${S.dbState === "loading" ? "Connecting to the review log…" : "The review log needs a signed-in viewer. Open this page while signed in to see and add reviews."}</p></div></section>`;
+  const R = S.reviews, O = S.outcomes || [], n = R.length, CR = S.copilotRatings || [];
+  const thr = CP().threshold, Rcp = R.filter(r => r.checkpoint === S.cp), imp = implied(Rcp, thr);
+  const rate = (xs, f) => xs.length ? pct(xs.filter(f).length / xs.length) : "–";
+  const students = [...new Set(R.map(r => r.student_id))], cases = students.map(caseOf).filter(Boolean);
+  const open = cases.filter(c => !c.closed), overdue = open.filter(c => c.overdue);
+  const byBand = BANDS.map(b => { const x = R.filter(r => r.ai_band === b); return { b, x }; });
+  const tagCounts = Object.entries(TAGS).map(([k, v]) => ({ k, v, n: R.filter(r => (r.reason_tags || []).includes(k)).length })).filter(t => t.n).sort((a, b) => b.n - a.n);
+  const latestOutcome = id => O.filter(o => o.student_id === id).sort(newest)[0];
+  const firstReview = id => R.filter(r => r.student_id === id).sort((a, b) => String(a.at).localeCompare(String(b.at)))[0];
+  const outRows = BANDS.map(b => { const ids = students.filter(id => { const f = firstReview(id); return f && f.ai_band === b && latestOutcome(id); }); const oc = ids.map(latestOutcome);
+    return { b, n: ids.length, good: oc.filter(o => ["support_accepted", "resolved"].includes(o.outcome)).length, bad: oc.filter(o => ["still_at_risk", "withdrew"].includes(o.outcome)).length }; });
+  const bars = RUBRIC.map(([k, nm]) => ({ nm, v: n ? R.reduce((s, r) => s + (r[k] || 0), 0) / n : 0 }));
+  const sig = signals(R, O, imp, thr);
+  const exports = n ? `<div class="row"><button class="btn" id="fb-export" data-export="reviews">Reviews (CSV)</button>${O.length ? `<button class="btn" data-export="outcomes">Outcomes (CSV)</button>` : ""}<button class="btn primary" data-export="retrain">Retraining feedback (CSV)</button></div>` : "";
+  const loopDiagram = `<div class="loop" aria-label="Feedback loop"><span>AI estimate</span><i aria-hidden="true">→</i><span>Advisor decision</span><i aria-hidden="true">→</i><span>Follow-up outcome</span><i aria-hidden="true">→</i><span>Signals and retraining data</span><i aria-hidden="true">↺</i></div>`;
   const cpPanel = `<section class="panel"><div class="headrow"><h3>Co-pilot answer quality</h3><span class="small muted">Generative AI evaluation</span></div>
-    <p class="small" style="margin-top:6px">${CR.length ? `<strong class="mono">${CR.length}</strong> rated answers · <strong class="mono">${pct(helpful / CR.length)}</strong> rated helpful · answers used on average <strong class="mono">${(CR.reduce((s, r) => s + (r.tools || 0), 0) / CR.length).toFixed(1)}</strong> grounding tool calls.` : "No co-pilot answers rated yet. Open the co-pilot, ask a question, and rate the answer."}</p>
-    <p class="small muted" style="margin-top:6px">Each rating is stored with the question and the number of tool calls the answer was grounded on, so relevance, usefulness and faithfulness can be reviewed for the report.</p></section>`;
-  return `<section class="headrow"><div><h2>Human–AI feedback loop</h2><p class="muted">Every advisor review is an append-only record. This is the evidence for the user-centred evaluation.</p></div>${n ? `<button class="btn" id="fb-export">Download reviews (CSV)</button>` : ""}</section>
+    <p class="small" style="margin-top:6px">${CR.length ? `<strong class="mono">${CR.length}</strong> rated answers · <strong class="mono">${pct(CR.filter(r => r.helpful).length / CR.length)}</strong> rated helpful · answers used on average <strong class="mono">${(CR.reduce((s, r) => s + (r.tools || 0), 0) / CR.length).toFixed(1)}</strong> grounding tool calls.` : "No co-pilot answers rated yet. Ask the co-pilot a question and rate the answer."}</p>
+    ${CR.filter(r => !r.helpful).length ? `<div class="eyebrow" style="margin:10px 0 4px">Answers rated not helpful (review these)</div><ul class="small">${CR.filter(r => !r.helpful).slice(0, 8).map(r => `<li>${esc(r.question)} <span class="muted">(${r.tools || 0} tool calls)</span></li>`).join("")}</ul>` : ""}</section>`;
+  if (!n) return `<section class="headrow"><div><h2>Human–AI feedback loop</h2><p class="muted">Advisors' decisions and follow-up outcomes are recorded here and fed back as evidence about the model.</p></div></section>${storeNote()}${loopDiagram}
+    <section class="panel"><h3>No decisions recorded yet</h3><p style="margin-top:6px">Open a student in the diagnostic view, record your decision and a follow-up date, then come back here after the follow-up to record what happened.</p><p style="margin-top:10px"><a class="btn primary" href="#student" data-open="${S.student}">Review student ${S.student}</a></p></section>${cpPanel}`;
+  return `<section class="headrow"><div><h2>Human–AI feedback loop</h2><p class="muted">Every decision and outcome is an append-only record. Together they show where advisors and the model agree, and they produce new labelled data for retraining.</p></div>${exports}</section>
+  ${storeNote()}${loopDiagram}
   <section class="kpis">
-    <div class="kpi"><div class="v">${n}</div><div class="l">Reviews recorded</div></div>
-    <div class="kpi"><div class="v">${n ? pct(agree / n) : "–"}</div><div class="l">Agreed with the AI</div></div>
-    <div class="kpi"><div class="v">${n ? pct(over / n) : "–"}</div><div class="l">Overrode the band</div></div>
-    <div class="kpi"><div class="v">${n ? pct(unc / n) : "–"}</div><div class="l">On uncertain predictions</div></div>
-    <div class="kpi"><div class="v">${new Set(R.map(r => r.reviewer)).size}</div><div class="l">Advisors</div></div>
-    <div class="kpi"><div class="v">${new Set(R.map(r => r.student_id)).size}</div><div class="l">Students reviewed</div></div>
+    <div class="kpi"><div class="v">${n}</div><div class="l">Decisions recorded</div></div>
+    <div class="kpi"><div class="v">${rate(R, r => r.decision === "agree")}</div><div class="l">Agreed with the AI</div></div>
+    <div class="kpi"><div class="v">${rate(R, r => bandMove(r) > 0)}</div><div class="l">Advisor raised the risk</div></div>
+    <div class="kpi"><div class="v">${rate(R, r => bandMove(r) < 0)}</div><div class="l">Advisor lowered the risk</div></div>
+    <div class="kpi"><div class="v">${open.length}${overdue.length ? ` <span class="small" style="color:var(--high)">(${overdue.length} late)</span>` : ""}</div><div class="l">Open cases</div></div>
+    <div class="kpi"><div class="v">${O.length}</div><div class="l">Outcomes recorded</div></div>
   </section>
-  ${n ? `<section class="grid2">
+  <section class="panel"><div class="headrow"><h3>What the feedback says about the model</h3><span class="prov ai">Feedback signals</span></div>
+    <ul class="signals">${sig.map(([k, t]) => `<li class="${k}">${esc(t)}</li>`).join("")}</ul>
+    <p class="small muted">Signals are recomputed every time a decision or outcome is saved. They inform the next retraining; they never change the live model on their own.</p></section>
+  <section class="grid2">
+    <div class="panel"><h3>Where advisors and the model differ</h3><div class="tablebox" style="margin-top:10px"><table><thead><tr><th>AI band</th><th class="r">Decisions</th><th class="r">Agreed</th><th class="r">Raised</th><th class="r">Lowered</th></tr></thead><tbody>
+      ${byBand.map(({ b, x }) => `<tr><td>${bandHTML(b)}</td><td class="r mono">${x.length}</td><td class="r mono">${rate(x, r => r.decision === "agree")}</td><td class="r mono">${rate(x, r => bandMove(r) > 0)}</td><td class="r mono">${rate(x, r => bandMove(r) < 0)}</td></tr>`).join("")}
+      <tr><td>Uncertain predictions</td><td class="r mono">${R.filter(r => r.ai_uncertain).length}</td><td class="r mono">${rate(R.filter(r => r.ai_uncertain), r => r.decision === "agree")}</td><td class="r mono">${rate(R.filter(r => r.ai_uncertain), r => bandMove(r) > 0)}</td><td class="r mono">${rate(R.filter(r => r.ai_uncertain), r => bandMove(r) < 0)}</td></tr></tbody></table></div>
+      ${imp ? `<p class="small" style="margin-top:8px">Advisor-implied threshold (${esc(CP().label)}): <strong class="mono">${pct(imp.t)}</strong> against the model's <strong class="mono">${pct(thr)}</strong>, from ${imp.n} decisions.</p>` : `<p class="small muted" style="margin-top:8px">The advisor-implied threshold appears after at least 8 decisions at this decision point, with some students judged Low and some not.</p>`}</div>
+    <div class="panel"><h3>Why advisors disagreed</h3>${tagCounts.length ? `<svg class="chart" viewBox="0 0 460 ${tagCounts.length * 30 + 10}" role="img" aria-label="Reasons given by advisors" style="margin-top:10px">${tagCounts.map((t, i) => { const w = 200 * t.n / tagCounts[0].n; return `<text x="236" y="${i * 30 + 20}" text-anchor="end" font-size="11.5" fill="var(--ink)">${esc(t.v.length > 38 ? t.v.slice(0, 37) + "…" : t.v)}</text><rect x="244" y="${i * 30 + 6}" width="${Math.max(w, 2)}" height="18" rx="3" fill="var(--sim)" fill-opacity=".8"/><text x="${250 + w}" y="${i * 30 + 20}" font-size="11" class="mono" fill="var(--muted)">${t.n}</text>`; }).join("")}</svg>` : `<p class="small muted" style="margin-top:8px">No reasons recorded yet. Reasons are collected whenever an advisor disagrees.</p>`}</div>
+  </section>
+  <section class="grid2">
+    <div class="panel"><h3>Follow-up outcomes against the AI band</h3><p class="small muted" style="margin-top:4px">Latest outcome per student, by the AI band at the first review. Resolved = support accepted or situation resolved; still at risk includes withdrawals.</p><div class="tablebox" style="margin-top:10px"><table><thead><tr><th>AI band</th><th class="r">With outcome</th><th class="r">Resolved</th><th class="r">Still at risk</th></tr></thead><tbody>
+      ${outRows.map(x => `<tr><td>${bandHTML(x.b)}</td><td class="r mono">${x.n}</td><td class="r mono">${x.n ? pct(x.good / x.n) : "–"}</td><td class="r mono">${x.n ? pct(x.bad / x.n) : "–"}</td></tr>`).join("")}</tbody></table></div>
+      <p class="small muted" style="margin-top:8px">If Low-band students end up still at risk, the model is missing cases; those students are flagged in the retraining export.</p></div>
     <div class="panel"><h3>Explanation quality rubric</h3><p class="small muted" style="margin-top:4px">Mean rating, 1–5.</p>
       <svg class="chart" viewBox="0 0 460 ${bars.length * 34 + 30}" role="img" aria-label="Mean rubric scores" style="margin-top:10px">
       ${[1, 2, 3, 4, 5].map(v => `<line x1="${120 + (v - 1) * 75}" x2="${120 + (v - 1) * 75}" y1="4" y2="${bars.length * 34 + 6}" stroke="var(--line)"/>${axisText(120 + (v - 1) * 75, bars.length * 34 + 22, v, "middle", "mono")}`).join("")}
       ${bars.map((b, i) => `<text x="110" y="${i * 34 + 22}" text-anchor="end" font-size="12" fill="var(--ink)">${b.nm}</text><rect class="gx" x="120" y="${i * 34 + 8}" width="${Math.max((b.v - 1) * 75, 2)}" height="20" rx="3" fill="var(--ai)" fill-opacity=".85"/><text x="${126 + Math.max((b.v - 1) * 75, 2)}" y="${i * 34 + 23}" font-size="11" class="mono" fill="var(--muted)">${b.v.toFixed(2)}</text>`).join("")}
       </svg></div>
-    <div class="panel"><h3>Disagreement by AI band</h3><div class="tablebox" style="margin-top:10px"><table><thead><tr><th>AI band</th><th class="r">Reviews</th><th class="r">Disagreed or overrode</th></tr></thead><tbody>
-      ${byBand.map(x => `<tr><td>${bandHTML(x.b)}</td><td class="r mono">${x.n}</td><td class="r mono">${x.n ? pct(x.ov / x.n) : "–"}</td></tr>`).join("")}</tbody></table></div>
-      <p class="small muted" style="margin-top:8px">High disagreement in one band shows where the model and advisors see students differently. Feed it into the next retraining.</p></div>
   </section>
-  <section class="panel"><h3>Latest reviews</h3><div class="tablebox" style="margin-top:10px"><table><thead><tr><th>When</th><th>Advisor</th><th>Student</th><th>AI</th><th>Decision</th><th>Action</th><th>Reason</th></tr></thead><tbody>
-    ${R.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 50).map(r => `<tr><td class="mono small">${esc(r.at.slice(0, 16).replace("T", " "))}</td><td>${esc(r.reviewerName)}</td><td class="mono"><a href="#student" data-open="${esc(r.student_id)}">${esc(r.student_id)}</a></td><td>${pct(r.ai_risk)} ${bandHTML(r.ai_band)}</td><td>${esc(r.decision)}${r.override_band ? " → " + esc(r.override_band) : ""}</td><td>${esc(ACTIONS[r.planned_action] || r.planned_action)}</td><td style="white-space:normal;min-width:180px">${esc(r.reason)}</td></tr>`).join("")}
-  </tbody></table></div></section>`
-  : `<section class="panel"><h3>No reviews yet</h3><p style="margin-top:6px">Open a student in the diagnostic view and record a review. It appears here for everyone with access to this page.</p><p style="margin-top:10px"><a class="btn primary" href="#student">Review student ${S.student}</a></p></section>`}${cpPanel}`;
+  <section class="panel"><div class="headrow"><h3>Caseload: open cases</h3><span class="small muted">Sorted by follow-up date</span></div>${open.length ? `<div class="tablebox" style="margin-top:10px"><table><thead><tr><th>Student</th><th>AI</th><th>Advisor</th><th>Decision</th><th>Action</th><th>Priority</th><th>Follow up by</th></tr></thead><tbody>
+    ${open.sort((a, b) => String(a.last.follow_up || "9").localeCompare(String(b.last.follow_up || "9"))).map(c => `<tr><td class="mono"><a href="#student" data-open="${esc(c.last.student_id)}">${esc(c.last.student_id)}</a></td><td>${pct(c.last.ai_risk)} ${bandHTML(c.last.ai_band)}</td><td>${bandHTML(advisorBand(c.last))} <span class="small muted">${esc(c.last.reviewerName)}</span></td><td>${esc(assessText(c.last))}</td><td>${esc(ACTIONS[c.last.planned_action] || c.last.planned_action)}</td><td>${esc(PRIORITY[c.last.priority] || "–")}</td><td class="mono" style="${c.overdue ? "color:var(--high);font-weight:600" : ""}">${esc(c.last.follow_up || "–")}${c.overdue ? " (late)" : ""}</td></tr>`).join("")}</tbody></table></div>` : `<p class="small muted" style="margin-top:6px">No open cases. Every reviewed student has a recorded outcome or needed no action.</p>`}</section>
+  <section class="panel"><h3>Audit log: latest decisions</h3><div class="tablebox" style="margin-top:10px"><table><thead><tr><th>When</th><th>Advisor</th><th>Student</th><th>AI</th><th>Decision</th><th>Action</th><th>Reasons</th></tr></thead><tbody>
+    ${R.slice().sort(newest).slice(0, 50).map(r => `<tr><td class="mono small">${esc(String(r.at).slice(0, 16).replace("T", " "))}</td><td>${esc(r.reviewerName)}</td><td class="mono"><a href="#student" data-open="${esc(r.student_id)}">${esc(r.student_id)}</a></td><td>${pct(r.ai_risk)} ${bandHTML(r.ai_band)}</td><td>${esc(assessText(r))} → ${bandHTML(advisorBand(r))}</td><td>${esc(ACTIONS[r.planned_action] || r.planned_action)}</td><td style="white-space:normal;min-width:180px">${esc([(r.reason_tags || []).map(k => TAGS[k] || k).join("; "), r.reason].filter(Boolean).join(" · "))}</td></tr>`).join("")}
+  </tbody></table></div></section>${cpPanel}`;
+}
+async function exportCSV(kind = "reviews") {
+  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`, R = S.reviews, O = S.outcomes || [];
+  let head, rows, name;
+  if (kind === "outcomes") {
+    head = ["at", "advisor", "student_id", "checkpoint", "review_id", "outcome", "closed", "note"]; rows = O.map(o => head.map(h => o[h])); name = "retentionflow_outcomes.csv";
+  } else if (kind === "retrain") {
+    // One row per reviewed student and decision point: the AI's estimate, the advisor's judgement, the outcome and the model inputs.
+    const keyed = {}; R.slice().sort(newest).forEach(r => { const k = r.student_id + "|" + r.checkpoint; if (!keyed[k]) keyed[k] = r; });
+    const feats = [...new Set(Object.values(W.checkpoints).flatMap(c => c.features))];
+    head = ["student_id", "checkpoint", "ai_risk", "ai_band", "ai_uncertain", "advisor_band", "advisor_move", "reason_tags", "latest_outcome", "outcome_label", "missed_by_model", ...feats];
+    rows = Object.values(keyed).map(r => { const o = O.filter(x => x.student_id === r.student_id).sort(newest)[0], row = BY_ID[r.student_id] || {};
+      const label = o ? (["still_at_risk", "withdrew"].includes(o.outcome) ? 1 : ["support_accepted", "resolved"].includes(o.outcome) ? 0 : "") : "";
+      return [r.student_id, r.checkpoint, r.ai_risk, r.ai_band, r.ai_uncertain, advisorBand(r), bandMove(r), (r.reason_tags || []).join(";"), o ? o.outcome : "", label, r.ai_band === "Low" && (label === 1 || bandMove(r) > 0) ? 1 : 0, ...feats.map(f => row[f])]; });
+    name = "retentionflow_retraining_feedback.csv";
+  } else {
+    head = ["at", "reviewer", "student_id", "checkpoint", "ai_risk", "ai_band", "ai_uncertain", "decision", "direction", "override_band", "advisor_band", "reason_tags", "planned_action", "priority", "follow_up", "clarity", "usefulness", "trust", "actionability", "reason"];
+    rows = R.map(r => head.map(h => h === "reviewer" ? r.reviewerName : h === "advisor_band" ? advisorBand(r) : h === "reason_tags" ? (r.reason_tags || []).join(";") : r[h])); name = "retentionflow_advisor_reviews.csv";
+  }
+  const csv = [head.join(","), ...rows.map(r => r.map(q).join(","))].join("\n");
+  if (WEB) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); return; }
+  try { const dl = await claude.use("downloads"); if (!dl) throw 0; await dl.save({ filename: name, data: csv }); }
+  catch (e) { const b = document.querySelector(`[data-export="${kind}"]`); if (b) b.textContent = "Download unavailable in this view"; }
 }
 
 /* ---------------- About ---------------- */
@@ -1063,10 +1264,6 @@ function render(keepScroll) {
   if (keepScroll) window.scrollTo(0, y);
   if (focusId) { const el = document.getElementById(focusId); if (el && keepScroll) { el.focus({ preventScroll: true }); try { if (sel != null) el.setSelectionRange(sel, sel); } catch (e) {} } }
 }
-function syncReview(form) {
-  const d = form.querySelector("input[name=decision]:checked").value;
-  form.querySelector("#ovr-row").hidden = d !== "override"; form.querySelector("#reason-req").hidden = d === "agree";
-}
 function animateEntry() {
   app.classList.remove("enter"); void app.offsetWidth; app.classList.add("enter");
   clearTimeout(animateEntry.t); animateEntry.t = setTimeout(() => app.classList.remove("enter"), 1200);
@@ -1100,7 +1297,7 @@ app.addEventListener("click", e => {
   if (t.dataset.del !== undefined) { S.scenarios.splice(+t.dataset.del, 1); render(true); return; }
   if (t.dataset.mt) { S.modelTab = t.dataset.mt; render(true); return; }
   if (t.id === "csv-clear") { S.csv = null; render(true); return; }
-  if (t.id === "fb-export") { exportCSV(); return; }
+  const ex = t.closest("[data-export]"); if (ex) { exportCSV(ex.dataset.export); return; }
 });
 app.addEventListener("keydown", e => {
   if (e.key !== "Enter" && e.key !== " ") return;
@@ -1122,7 +1319,7 @@ app.addEventListener("change", e => {
   else if (t.id === "pick") { const v = t.value.trim().toUpperCase(); S.student = /^S\d+$/.test(v) ? "S" + v.slice(1).padStart(4, "0") : v; S.changes = {}; render(true); animateEntry(); CO.refresh(); }
   else if (t.dataset.lever && t.type === "checkbox") { S.changes[t.dataset.lever] = t.checked ? 1 : 0; patchWhatIf(); }
   else if (t.id === "drift-scn") { S.driftScenario = t.value; render(true); }
-  else if (t.name === "decision") syncReview(t.form);
+  else if (t.name === "assess" || t.id === "rv-action") syncReview(t.form);
   else if (t.id === "csv-up" && t.files && t.files[0]) {
     const file = t.files[0], msg = document.getElementById("csv-msg");
     if (file.size > 8e6) { msg.textContent = "That file is over 8 MB. Use a smaller cohort file."; return; }
@@ -1138,17 +1335,8 @@ app.addEventListener("change", e => {
     rd.readAsText(file);
   }
 });
-app.addEventListener("submit", e => { if (e.target.id === "review-form") { e.preventDefault(); saveReview(e.target); } });
+app.addEventListener("submit", e => { if (e.target.id === "review-form") { e.preventDefault(); saveReview(e.target); } else if (e.target.id === "outcome-form") { e.preventDefault(); saveOutcome(e.target); } });
 app.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id === "pick") { e.preventDefault(); e.target.dispatchEvent(new Event("change", { bubbles: true })); } });
-async function exportCSV() {
-  const head = ["at", "reviewer", "student_id", "checkpoint", "ai_risk", "ai_band", "ai_uncertain", "decision", "override_band", "planned_action", "clarity", "usefulness", "trust", "actionability", "reason"];
-  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const csv = [head.join(","), ...S.reviews.map(r => head.map(h => q(h === "reviewer" ? r.reviewerName : r[h])).join(","))].join("\n");
-  if (WEB) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "retentionflow_advisor_reviews.csv"; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); return; }
-  try { const dl = await claude.use("downloads"); if (!dl) throw 0; await dl.save({ filename: "retentionflow_advisor_reviews.csv", data: csv }); }
-  catch (e) { const b = document.getElementById("fb-export"); if (b) b.textContent = "Download unavailable in this view"; }
-}
-
 /* ---------------- AI co-pilot (Claude via the page's `sample` capability) ----------------
    Grounding: Claude never sees free-floating numbers. It calls the page's own tools, which run the
    trained model in this browser (risk, 90% range, SHAP, What-If, cohort, evidence), and every tool
@@ -1163,6 +1351,12 @@ const CO = (() => {
   const normId = v => { const x = String(v || "").trim().toUpperCase(); return /^S?\d+$/.test(x) ? "S" + x.replace(/^S/, "").padStart(4, "0") : x; };
   const cpOf = v => (v === "sem2" || v === "sem1") ? v : S.cp;
 
+  function advisorCase(id) {
+    const c = caseOf(id); if (!c) return "No advisor has reviewed this student yet.";
+    const o = c.outcomes[0];
+    return { status: c.status, last_decision: assessText(c.last), advisor_band: advisorBand(c.last), ai_band_at_review: c.last.ai_band, planned_action: ACTIONS[c.last.planned_action] || c.last.planned_action,
+      follow_up_by: c.last.follow_up || null, reasons: (c.last.reason_tags || []).map(k => TAGS[k] || k), note: c.last.reason || "", latest_outcome: o ? OUTCOMES[o.outcome] || o.outcome : null, decided_by: c.last.reviewerName || "Advisor" };
+  }
   function studentFacts(id, cpKey) {
     const row = BY_ID[normId(id)]; if (!row) throw new Error(`No held-out student ${id}. IDs look like S1529.`);
     const cp = W.checkpoints[cpKey], s = SCORES[cpKey][row.id], sh = RF.shap(cp.model, row);
@@ -1172,7 +1366,7 @@ const CO = (() => {
     const other = cpKey === "sem1" ? "sem2" : "sem1";
     return { student_id: row.id, decision_point: cp.label, risk_pct: r2(s.risk), range_90_pct: [r2(s.lo), r2(s.hi)], band: s.band,
       flagged_for_review: s.flagged, uncertain: s.uncertain, review_threshold_pct: r2(cp.threshold), top_factors: top, observed,
-      risk_at_other_decision_point_pct: r2(SCORES[other][row.id].risk) };
+      risk_at_other_decision_point_pct: r2(SCORES[other][row.id].risk), advisor_case: advisorCase(row.id) };
   }
   const TOOLS = [
     { name: "get_student", description: "Returns one held-out student's AI risk estimate (percent), 90% uncertainty range, band, review flag, the SHAP factors driving it, and key observed record fields. Use before saying anything about a student.",
@@ -1321,20 +1515,14 @@ Tools are unavailable in this view, so here is the selected student's data: ${JS
     }
   }
   async function rate(i, v) {
-    const m = log[i]; if (!m) return; m.rated = v; m.ratedMsg = "Thanks, noted.";
-    paint();
-    if (WEB) {
-      if (!WEBCFG.store) { m.ratedMsg = "Rating kept for this visit (no store connected)."; paint(); return; }
-      try { const r = await api("/api/store?kind=ratings", { method: "POST", body: JSON.stringify({ helpful: !!v, question: m.q.slice(0, 300), tools: (m.trace || []).length, checkpoint: S.cp, view: S.view, advisor: ident.name }) }); (S.copilotRatings ||= []).unshift(r.item); m.ratedMsg = "Thanks, saved to the evaluation log."; }
-      catch (e) { m.ratedMsg = e.code === "bad_code" ? "Enter the advisor access code in a review form first." : "Could not save the rating."; }
-      paint(); return;
-    }
-    if (!DB || !S.uid) { m.ratedMsg = "Rating kept for this visit (sign in to save it)."; paint(); return; }
+    const m = log[i]; if (!m) return; m.rated = v; m.ratedMsg = "Thanks, noted."; paint();
+    if (!WEB && (!DB || !S.uid)) { m.ratedMsg = "Rating kept for this visit (sign in to save it)."; paint(); return; }
     try {
-      const ref = DB.doc("copilot/" + S.uid), cur = await ref.get(), items = cur.exists && cur.data().items ? [...cur.data().items] : [];
-      items.push({ at: new Date().toISOString(), helpful: !!v, question: m.q.slice(0, 300), tools: (m.trace || []).length, checkpoint: S.cp, view: S.view });
-      await ref.set({ items: items.slice(-400) }); m.ratedMsg = "Thanks, saved to the evaluation log."; paint();
-    } catch (e) { m.ratedMsg = "Could not save the rating."; paint(); }
+      const item = { helpful: !!v, question: m.q.slice(0, 300), tools: (m.trace || []).length, checkpoint: S.cp, view: S.view, advisor: ident.name || undefined };
+      const saved = await appendRecord("ratings", item); if (WEB) S.copilotRatings.unshift({ ...item, ...saved });
+      m.ratedMsg = WEB && S.storeMode === "local" ? "Thanks, saved in this browser." : "Thanks, saved to the evaluation log.";
+    } catch (e) { m.ratedMsg = e && e.code === "bad_code" ? "Enter the advisor access code in a review form first." : "Could not save the rating."; }
+    paint();
   }
   function open() { $("copilot").classList.add("open"); $("copilot").setAttribute("aria-hidden", "false"); $("cp-toggle").setAttribute("aria-expanded", "true"); document.body.classList.add("cp-docked"); context(); paint(); setTimeout(() => $("cp-input").focus({ preventScroll: true }), 50); }
   function close() { $("copilot").classList.remove("open"); $("copilot").setAttribute("aria-hidden", "true"); $("cp-toggle").setAttribute("aria-expanded", "false"); document.body.classList.remove("cp-docked"); $("cp-toggle").focus({ preventScroll: true }); }
